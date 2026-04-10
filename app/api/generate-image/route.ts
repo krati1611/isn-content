@@ -1,11 +1,47 @@
 import { NextResponse } from 'next/server';
 
+/**
+ * Uploads a base64 data URI to the Replicate Files API and returns a public URL.
+ * Replicate's model inputs only accept HTTP URLs, not raw base64 strings.
+ */
+async function uploadBase64ToReplicate(dataUri: string, token: string): Promise<string> {
+  const match = dataUri.match(/^data:([^;]+);base64,(.+)$/);
+  if (!match) throw new Error("Invalid base64 data URI for reference image.");
+
+  const mimeType = match[1];           // e.g. "image/jpeg"
+  const base64Data = match[2];
+  const buffer = Buffer.from(base64Data, 'base64');
+  const blob = new Blob([buffer], { type: mimeType });
+
+  const ext = mimeType.split('/')[1] || 'jpg';
+  const formData = new FormData();
+  formData.append('content', blob, `reference.${ext}`);
+
+  const uploadRes = await fetch('https://api.replicate.com/v1/files', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${token}`,
+    },
+    body: formData,
+  });
+
+  if (!uploadRes.ok) {
+    throw new Error("Failed to upload reference image to Replicate: " + await uploadRes.text());
+  }
+
+  const uploadData = await uploadRes.json();
+  // Replicate Files API returns { urls: { get: "https://..." } }
+  const url = uploadData?.urls?.get;
+  if (!url) throw new Error("Replicate file upload returned no URL: " + JSON.stringify(uploadData));
+  return url;
+}
+
 export async function POST(req: Request) {
   try {
     const body = await req.json();
     const { imagePrompt, referenceImage } = body;
 
-    const REPLICATE_API_TOKEN = process.env.REPLICATE_API_TOKEN;
+    const REPLICATE_API_TOKEN = process.env.REPLICATE_API_TOKEN!;
 
     const replicateInputs: any = {
       prompt: imagePrompt.replace(/\\n/g, ' ').replace(/\\"/g, ''),
@@ -14,8 +50,17 @@ export async function POST(req: Request) {
       output_format: "png"
     };
 
+    // If a reference image was supplied as a base64 data URI, upload it first
+    // so Replicate receives a proper public HTTP URL.
     if (referenceImage) {
-      replicateInputs.image_input = [referenceImage];
+      let imageUrl: string;
+      if (referenceImage.startsWith('data:')) {
+        imageUrl = await uploadBase64ToReplicate(referenceImage, REPLICATE_API_TOKEN);
+      } else {
+        // Already a URL (shouldn't normally happen from the current UI, but safe to handle)
+        imageUrl = referenceImage;
+      }
+      replicateInputs.image_input = [imageUrl];
     } else {
       replicateInputs.image_input = [];
     }
@@ -34,13 +79,11 @@ export async function POST(req: Request) {
     
     let repData = await repRes.json();
     
-    // Polling structure in case 'Prefer: wait' times out or generation takes extremely long
+    // Polling in case 'Prefer: wait' times out
     while (repData.status === "starting" || repData.status === "processing") {
       await new Promise(resolve => setTimeout(resolve, 3000));
       repRes = await fetch(repData.urls.get, {
-        headers: {
-          "Authorization": `Bearer ${REPLICATE_API_TOKEN}`
-        }
+        headers: { "Authorization": `Bearer ${REPLICATE_API_TOKEN}` }
       });
       if (!repRes.ok) throw new Error("Replicate Poll Error: " + await repRes.text());
       repData = await repRes.json();
