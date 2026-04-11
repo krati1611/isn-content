@@ -131,6 +131,7 @@ export default function Home() {
           goal: snap.goal,
           placement: snap.placement,
           includeHuman: snap.includeHuman,
+          hasReferenceImages: snap.referenceImages.length > 0,
         }),
       });
       const data1 = await res1.json();
