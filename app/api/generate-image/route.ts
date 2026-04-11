@@ -39,7 +39,7 @@ async function uploadBase64ToReplicate(dataUri: string, token: string): Promise<
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    const { imagePrompt, referenceImage } = body;
+    const { imagePrompt, referenceImages } = body as { imagePrompt: string; referenceImages?: string[] };
 
     const REPLICATE_API_TOKEN = process.env.REPLICATE_API_TOKEN!;
 
@@ -50,17 +50,17 @@ export async function POST(req: Request) {
       output_format: "png"
     };
 
-    // If a reference image was supplied as a base64 data URI, upload it first
-    // so Replicate receives a proper public HTTP URL.
-    if (referenceImage) {
-      let imageUrl: string;
-      if (referenceImage.startsWith('data:')) {
-        imageUrl = await uploadBase64ToReplicate(referenceImage, REPLICATE_API_TOKEN);
-      } else {
-        // Already a URL (shouldn't normally happen from the current UI, but safe to handle)
-        imageUrl = referenceImage;
-      }
-      replicateInputs.image_input = [imageUrl];
+    // Upload each reference image (base64 data URI → public Replicate URL)
+    if (referenceImages && referenceImages.length > 0) {
+      const uploadedUrls = await Promise.all(
+        referenceImages.map((img) => {
+          if (img.startsWith('data:')) {
+            return uploadBase64ToReplicate(img, REPLICATE_API_TOKEN);
+          }
+          return Promise.resolve(img); // already a URL
+        })
+      );
+      replicateInputs.image_input = uploadedUrls;
     } else {
       replicateInputs.image_input = [];
     }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useCallback } from "react";
 import "./globals.css";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -20,7 +20,7 @@ type FormSnapshot = {
   goal: string;
   placement: string;
   includeHuman: boolean;
-  referenceImage: string | null;
+  referenceImages: string[];
 };
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -30,7 +30,8 @@ export default function Home() {
   const [goal, setGoal] = useState("");
   const [placement, setPlacement] = useState("bottom");
   const [includeHuman, setIncludeHuman] = useState(true);
-  const [referenceImage, setReferenceImage] = useState<string | null>(null);
+  // Each entry is either a data URI (uploaded) or null (empty slot)
+  const [referenceImages, setReferenceImages] = useState<(string | null)[]>([null]);
   const [numImages, setNumImages] = useState(1);
 
   // All slots from every batch ever submitted — grows monotonically
@@ -43,7 +44,7 @@ export default function Home() {
   // Global batch counter
   const batchCounter = useRef(0);
 
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const fileInputRefs = useRef<(HTMLInputElement | null)[]>([]);
 
   // ── Helpers ───────────────────────────────────────────────────────────────
   const updateSlot = (id: number, patch: Partial<ImageSlot>) => {
@@ -52,14 +53,38 @@ export default function Home() {
     );
   };
 
-  const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
+  const handleImageChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>, index: number) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
       const reader = new FileReader();
-      reader.onloadend = () => setReferenceImage(reader.result as string);
+      reader.onloadend = () => {
+        const dataUri = reader.result as string;
+        setReferenceImages((prev) => {
+          const next = [...prev];
+          next[index] = dataUri;
+          // Append a new empty slot if this was the last one
+          if (index === next.length - 1) {
+            next.push(null);
+          }
+          return next;
+        });
+      };
       reader.readAsDataURL(file);
-    }
-  };
+    },
+    []
+  );
+
+  const handleRemoveImage = useCallback((index: number) => {
+    setReferenceImages((prev) => {
+      const next = prev.filter((_, i) => i !== index);
+      // Always keep at least one empty slot
+      if (next.length === 0 || next[next.length - 1] !== null) {
+        next.push(null);
+      }
+      return next;
+    });
+  }, []);
 
   // ── Pipeline for a single image slot (uses snapshotted form values) ───────
   const generateOne = async (id: number, snap: FormSnapshot) => {
@@ -88,7 +113,7 @@ export default function Home() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           imagePrompt: data1.prompt,
-          referenceImage: snap.referenceImage,
+          referenceImages: snap.referenceImages,
         }),
       });
       const data2 = await res2.json();
@@ -105,7 +130,14 @@ export default function Home() {
     e.preventDefault();
 
     // Snapshot the form values at this moment in time
-    const snap: FormSnapshot = { idea, hook, goal, placement, includeHuman, referenceImage };
+    const snap: FormSnapshot = {
+      idea,
+      hook,
+      goal,
+      placement,
+      includeHuman,
+      referenceImages: referenceImages.filter((r): r is string => r !== null),
+    };
 
     // Assign a unique batch id and label
     batchCounter.current += 1;
@@ -460,8 +492,7 @@ export default function Home() {
                   type="text"
                   value={hook}
                   onChange={(e) => setHook(e.target.value)}
-                  required
-                  placeholder="Your hook line"
+                  placeholder="Your hook line (optional)"
                 />
               </div>
               <div className="field">
@@ -470,8 +501,7 @@ export default function Home() {
                   type="text"
                   value={goal}
                   onChange={(e) => setGoal(e.target.value)}
-                  required
-                  placeholder="e.g. Book a test"
+                  placeholder="e.g. Book a test (optional)"
                 />
               </div>
             </div>
@@ -517,27 +547,63 @@ export default function Home() {
               </div>
             </div>
 
-            {/* Reference image */}
+            {/* Reference images — dynamic list */}
             <div className="field">
-              <label>Reference Image (Optional)</label>
-              <label className="file-label" htmlFor="ref-img-input">
-                {referenceImage ? (
-                  <>
-                    <img src={referenceImage} className="ref-preview" alt="ref" />
-                    <span>Reference attached – click to change</span>
-                  </>
-                ) : (
-                  <>📎 Upload reference image</>
-                )}
-              </label>
-              <input
-                id="ref-img-input"
-                ref={fileInputRef}
-                type="file"
-                accept="image/*"
-                onChange={handleImageChange}
-                style={{ display: "none" }}
-              />
+              <label>Reference Images (Optional)</label>
+              <div style={{ display: "flex", flexDirection: "column", gap: "0.6rem" }}>
+                {referenceImages.map((img, idx) => (
+                  <div key={idx} style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                    <label
+                      className="file-label"
+                      htmlFor={`ref-img-input-${idx}`}
+                      style={{ flex: 1, margin: 0 }}
+                    >
+                      {img ? (
+                        <>
+                          <img src={img} className="ref-preview" alt={`ref-${idx}`} />
+                          <span>Image {idx + 1} attached – click to change</span>
+                        </>
+                      ) : (
+                        <>
+                          <span style={{ opacity: 0.5 }}>📎</span>
+                          <span>
+                            {idx === 0 ? "Upload reference image" : `Add image ${idx + 1}`}
+                          </span>
+                        </>
+                      )}
+                    </label>
+                    {img && (
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveImage(idx)}
+                        style={{
+                          background: "rgba(233,83,69,0.15)",
+                          border: "1.5px solid rgba(233,83,69,0.35)",
+                          borderRadius: "8px",
+                          color: "#E95345",
+                          padding: "0.45rem 0.65rem",
+                          cursor: "pointer",
+                          fontSize: "0.85rem",
+                          flexShrink: 0,
+                          lineHeight: 1,
+                          transition: "background 0.15s",
+                        }}
+                        title="Remove this image"
+                      >
+                        ✕
+                      </button>
+                    )}
+                    <input
+                      id={`ref-img-input-${idx}`}
+                      ref={(el) => { fileInputRefs.current[idx] = el; }}
+                      type="file"
+                      accept="image/*"
+                      onChange={(e) => handleImageChange(e, idx)}
+                      style={{ display: "none" }}
+                    />
+                  </div>
+                ))}
+              </div>
             </div>
 
             {/* Submit — always enabled so you can queue more batches */}
