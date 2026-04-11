@@ -53,13 +53,43 @@ export default function Home() {
     );
   };
 
+  /** Compress + resize an image file client-side before storing as base64. */
+  const compressImage = (file: File): Promise<string> =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onerror = reject;
+      reader.onloadend = () => {
+        const img = new Image();
+        img.onerror = reject;
+        img.onload = () => {
+          const MAX_PX = 1200; // longest dimension cap
+          let { width, height } = img;
+          if (width > MAX_PX || height > MAX_PX) {
+            if (width >= height) {
+              height = Math.round((height / width) * MAX_PX);
+              width = MAX_PX;
+            } else {
+              width = Math.round((width / height) * MAX_PX);
+              height = MAX_PX;
+            }
+          }
+          const canvas = document.createElement("canvas");
+          canvas.width = width;
+          canvas.height = height;
+          canvas.getContext("2d")!.drawImage(img, 0, 0, width, height);
+          resolve(canvas.toDataURL("image/jpeg", 0.82));
+        };
+        img.src = reader.result as string;
+      };
+      reader.readAsDataURL(file);
+    });
+
   const handleImageChange = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>, index: number) => {
+    async (e: React.ChangeEvent<HTMLInputElement>, index: number) => {
       const file = e.target.files?.[0];
       if (!file) return;
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        const dataUri = reader.result as string;
+      try {
+        const dataUri = await compressImage(file);
         setReferenceImages((prev) => {
           const next = [...prev];
           next[index] = dataUri;
@@ -69,8 +99,9 @@ export default function Home() {
           }
           return next;
         });
-      };
-      reader.readAsDataURL(file);
+      } catch {
+        alert("Could not process the selected image. Please try a different file.");
+      }
     },
     []
   );
