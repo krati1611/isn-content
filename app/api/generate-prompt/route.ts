@@ -5,9 +5,12 @@ export async function POST(req: Request) {
     const body = await req.json();
     const { idea, hook, goal, placement, includeHuman, hasReferenceImages } = body;
 
-    const personRule = includeHuman 
-      ? "All people must be Nigerian West African, dark skin, natural features, warm and relatable expressions."
-      : "DO NOT include any people, focus entirely on the products and environment.";
+    // When reference images contain people, override generic person rule with fidelity instruction
+    const personRule = hasReferenceImages && includeHuman
+      ? "EXACT PERSON REPLICATION: The reference image(s) contain real people. You MUST reproduce those exact individuals — preserve their precise facial features, skin tone, hair, clothing, and expression faithfully. Do NOT replace them with generic or different people."
+      : includeHuman
+        ? "All people must be Nigerian West African, dark skin, natural features, warm and relatable expressions."
+        : "DO NOT include any people, focus entirely on the products and environment.";
       
     let layoutSystem = "";
     let layoutUser = "";
@@ -29,7 +32,7 @@ export async function POST(req: Request) {
     }
 
     const referenceRule = hasReferenceImages
-      ? "CRITICAL: Reference images have been provided. You MUST use ONLY the exact products, equipment, and props visible in those reference images. Do NOT invent, add, or substitute any other equipment, props, or medical devices. The scene must contain only what is shown in the references."
+      ? "CRITICAL — Reference images have been provided. You MUST replicate ONLY what is shown in those reference images: exact people (same face, skin tone, clothing, pose), exact products, exact equipment and props. Do NOT invent, add, substitute, or replace anything — not people, not devices, not props. The generated image must be a faithful scene recreation using only the elements present in the references."
       : "";
 
     const systemMessage = `You are a brand visual strategist for ISN Medical, a premium Nigerian medical diagnostics company. Your job is to generate highly detailed AI image prompts for Replicate. Output only the final image prompt, nothing else. Never include text, labels, logos or watermarks. ${layoutSystem}${
@@ -54,7 +57,7 @@ Create a portrait format base image with these exact rules:
 9. Orientation portrait 4:5
 10. Photorealistic, cinematic, premium healthcare brand, editorial feel
 11. Reference image_input for people, style or product details if provided${hasReferenceImages ? `
-12. STRICT EQUIPMENT RULE: Use ONLY the exact products and equipment from the provided reference images. Do NOT add any other medical devices, props, or equipment that are not visible in the references. Reproduce the exact items faithfully.` : ``}`;
+12. STRICT FIDELITY RULE: Use ONLY what is visible in the reference images. Reproduce exact people (face, skin tone, hair, outfit, expression), exact products and exact equipment. Do NOT substitute, add, or invent anything — not a different person, not extra props, not different devices. The output must look like the reference people are placed into a new studio setting.` : ``}`;
 
     // Normally read from .env.local
     const GROQ_API_KEY = process.env.GROQ_API_KEY;

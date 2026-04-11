@@ -21,6 +21,7 @@ type FormSnapshot = {
   placement: string;
   includeHuman: boolean;
   referenceImages: string[];
+  useExactReference: boolean;
 };
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -32,6 +33,7 @@ export default function Home() {
   const [includeHuman, setIncludeHuman] = useState(true);
   // Each entry is either a data URI (uploaded) or null (empty slot)
   const [referenceImages, setReferenceImages] = useState<(string | null)[]>([null]);
+  const [useExactReference, setUseExactReference] = useState(false);
   const [numImages, setNumImages] = useState(1);
 
   // All slots from every batch ever submitted — grows monotonically
@@ -113,13 +115,88 @@ export default function Home() {
       if (next.length === 0 || next[next.length - 1] !== null) {
         next.push(null);
       }
+      // If no images left, reset the exact reference toggle
+      const hasUploaded = next.some((r) => r !== null);
+      if (!hasUploaded) setUseExactReference(false);
       return next;
     });
   }, []);
 
+  // ── Client-side canvas composition for exact reference placement ────────────
+  const composeExactImage = (dataUri: string, placement: string): Promise<string> =>
+    new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onerror = reject;
+      img.onload = () => {
+        const canvas = document.createElement("canvas");
+        const CANVAS_W = 1600;
+        const CANVAS_H = 2000;
+        canvas.width = CANVAS_W;
+        canvas.height = CANVAS_H;
+        const ctx = canvas.getContext("2d")!;
+
+        // Fill white background (studio backdrop)
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
+
+        // Scale image based on placement to guarantee empty text space
+        let width = img.width;
+        let height = img.height;
+
+        if (placement === "center") {
+          // Maximize to canvas
+          const ratio = Math.min(CANVAS_W / width, CANVAS_H / height);
+          width *= ratio;
+          height *= ratio;
+        } else if (placement === "top" || placement === "bottom") {
+          // We want vertical empty space. Cap height at 65% of canvas.
+          const MAX_H = CANVAS_H * 0.65;
+          const ratio = Math.min(CANVAS_W / width, MAX_H / height);
+          width *= ratio;
+          height *= ratio;
+        } else if (placement === "left" || placement === "right") {
+          // We want horizontal empty space. Cap width at 60% of canvas.
+          const MAX_W = CANVAS_W * 0.60;
+          const ratio = Math.min(MAX_W / width, CANVAS_H / height);
+          width *= ratio;
+          height *= ratio;
+        }
+
+        let x = (CANVAS_W - width) / 2;
+        let y = (CANVAS_H - height) / 2;
+
+        if (placement === "bottom") {
+          y = CANVAS_H - height;
+        } else if (placement === "top") {
+          y = 0;
+        } else if (placement === "left") {
+          x = 0;
+        } else if (placement === "right") {
+          x = CANVAS_W - width;
+        }
+
+        ctx.drawImage(img, x, y, width, height);
+        resolve(canvas.toDataURL("image/jpeg", 0.9));
+      };
+      img.src = dataUri;
+    });
+
   // ── Pipeline for a single image slot (uses snapshotted form values) ───────
-  const generateOne = async (id: number, snap: FormSnapshot) => {
+  const generateOne = async (id: number, snap: FormSnapshot, directImageUrl?: string) => {
     try {
+      // ── Exact-reference shortcut: skip AI, use the image directly ─────────
+      if (snap.useExactReference && directImageUrl) {
+        updateSlot(id, { status: "generating" });
+        const composedDataUri = await composeExactImage(directImageUrl, snap.placement);
+        updateSlot(id, {
+          imageUrl: composedDataUri,
+          prompt: `(Exact reference placed at ${snap.placement} — no AI generation)`,
+          status: "done"
+        });
+        return;
+      }
+
+      // ── Normal AI pipeline ────────────────────────────────────────────────
       // Step 1 – prompt
       updateSlot(id, { status: "prompting" });
       const res1 = await fetch("/api/generate-prompt", {
@@ -169,7 +246,26 @@ export default function Home() {
       placement,
       includeHuman,
       referenceImages: referenceImages.filter((r): r is string => r !== null),
+      useExactReference,
     };
+
+    // ── Exact-reference mode: one output slot per uploaded reference image ──
+    if (snap.useExactReference && snap.referenceImages.length > 0) {
+      batchCounter.current += 1;
+      const thisBatchId = batchCounter.current;
+      const thisBatchLabel = `Batch ${thisBatchId}`;
+
+      const newSlots: ImageSlot[] = snap.referenceImages.map(() => {
+        const id = slotCounter.current++;
+        return { id, batchId: thisBatchId, batchLabel: thisBatchLabel, status: "pending", prompt: null, imageUrl: null, error: null };
+      });
+
+      setSlots((prev) => [...newSlots, ...prev]);
+      setActiveBatches((n) => n + 1);
+      await Promise.allSettled(newSlots.map((s, i) => generateOne(s.id, snap, snap.referenceImages[i])));
+      setActiveBatches((n) => n - 1);
+      return;
+    }
 
     // Assign a unique batch id and label
     batchCounter.current += 1;
@@ -636,6 +732,33 @@ export default function Home() {
                   </div>
                 ))}
               </div>
+
+              {/* "Use exact reference" toggle — only visible when images are uploaded */}
+              {referenceImages.some((r) => r !== null) && (
+                <label
+                  className="checkbox-row"
+                  style={{
+                    marginTop: "0.6rem",
+                    padding: "0.6rem 0.85rem",
+                    background: useExactReference ? "rgba(0,161,215,0.1)" : "rgba(255,255,255,0.03)",
+                    border: `1.5px solid ${useExactReference ? "rgba(0,161,215,0.45)" : "rgba(255,255,255,0.08)"}`,
+                    borderRadius: "9px",
+                    transition: "background 0.2s, border-color 0.2s",
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={useExactReference}
+                    onChange={(e) => setUseExactReference(e.target.checked)}
+                  />
+                  <span>
+                    <strong style={{ color: useExactReference ? "#00A1D7" : "#cbd5e1" }}>Use exact reference image(s)</strong>
+                    <span style={{ display: "block", fontSize: "0.75rem", color: "#64748b", marginTop: "2px" }}>
+                      Skip AI generation — output the uploaded image(s) directly
+                    </span>
+                  </span>
+                </label>
+              )}
             </div>
 
             {/* Submit — always enabled so you can queue more batches */}
