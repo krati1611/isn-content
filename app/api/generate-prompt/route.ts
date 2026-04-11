@@ -7,9 +7,9 @@ export async function POST(req: Request) {
 
     // When reference images contain people, override generic person rule with fidelity instruction
     const personRule = hasReferenceImages && includeHuman
-      ? "EXACT PERSON REPLICATION: The reference image(s) contain real people. You MUST reproduce those exact individuals — preserve their precise facial features, skin tone, hair, clothing, and expression faithfully. Do NOT replace them with generic or different people."
+      ? "EXACT PERSON REPLICATION: The reference image(s) contain real people. You MUST reproduce those exact individuals (Nigerian West African features) — preserve their precise facial features, skin tone, hair, clothing, and expression faithfully. Do NOT replace them with generic or different people."
       : includeHuman
-        ? "All people must be Nigerian West African, dark skin, natural features, warm and relatable expressions."
+        ? "All people MUST be Nigerian West African, dark skin, natural features, warm and relatable expressions. Do NOT generate people of other ethnicities."
         : "DO NOT include any people, focus entirely on the products and environment.";
       
     let layoutSystem = "";
