@@ -139,43 +139,42 @@ export default function Home() {
         ctx.fillStyle = "#ffffff";
         ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
 
-        // Scale image based on placement to guarantee empty text space
-        let width = img.width;
-        let height = img.height;
+        // Define the exact target box based on placement (leaving space for text)
+        let boxX = 0, boxY = 0, boxW = CANVAS_W, boxH = CANVAS_H;
 
-        if (placement === "center") {
-          // Maximize to canvas
-          const ratio = Math.min(CANVAS_W / width, CANVAS_H / height);
-          width *= ratio;
-          height *= ratio;
-        } else if (placement === "top" || placement === "bottom") {
-          // We want vertical empty space. Cap height at 65% of canvas.
-          const MAX_H = CANVAS_H * 0.65;
-          const ratio = Math.min(CANVAS_W / width, MAX_H / height);
-          width *= ratio;
-          height *= ratio;
-        } else if (placement === "left" || placement === "right") {
-          // We want horizontal empty space. Cap width at 60% of canvas.
-          const MAX_W = CANVAS_W * 0.60;
-          const ratio = Math.min(MAX_W / width, CANVAS_H / height);
-          width *= ratio;
-          height *= ratio;
-        }
-
-        let x = (CANVAS_W - width) / 2;
-        let y = (CANVAS_H - height) / 2;
-
-        if (placement === "bottom") {
-          y = CANVAS_H - height;
-        } else if (placement === "top") {
-          y = 0;
-        } else if (placement === "left") {
-          x = 0;
+        if (placement === "left") {
+          boxW = CANVAS_W * 0.55;
         } else if (placement === "right") {
-          x = CANVAS_W - width;
+          boxW = CANVAS_W * 0.55;
+          boxX = CANVAS_W - boxW;
+        } else if (placement === "top") {
+          boxH = CANVAS_H * 0.55;
+        } else if (placement === "bottom") {
+          boxH = CANVAS_H * 0.55;
+          boxY = CANVAS_H - boxH;
         }
 
-        ctx.drawImage(img, x, y, width, height);
+        // Calculate "object-fit: cover" cropping parameters
+        const boxRatio = boxW / boxH;
+        const imgRatio = img.width / img.height;
+        let sx, sy, sWidth, sHeight;
+
+        if (imgRatio > boxRatio) {
+          // Image is relatively wider than the target box -> crop horizontally
+          sHeight = img.height;
+          sWidth = img.height * boxRatio;
+          sx = (img.width - sWidth) / 2;
+          sy = 0;
+        } else {
+          // Image is relatively taller than the target box -> crop vertically
+          sWidth = img.width;
+          sHeight = img.width / boxRatio;
+          sx = 0;
+          sy = (img.height - sHeight) / 2; // Center crop
+        }
+
+        // Draw cropped area into the perfect target box
+        ctx.drawImage(img, sx, sy, sWidth, sHeight, boxX, boxY, boxW, boxH);
         resolve(canvas.toDataURL("image/jpeg", 0.9));
       };
       img.src = dataUri;
