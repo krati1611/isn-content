@@ -7,9 +7,9 @@ export async function POST(req: Request) {
 
     // When reference images contain people, override generic person rule with fidelity instruction
     const personRule = hasReferenceImages && includeHuman
-      ? "EXACT PERSON REPLICATION: The reference image(s) contain real people. You MUST reproduce those exact individuals (Nigerian West African features) — preserve their precise facial features, skin tone, hair, clothing, and expression faithfully. Do NOT replace them with generic or different people."
+      ? "EXACT PERSON REPLICATION: The reference image(s) contain real people. You MUST reproduce those exact individuals — preserve their precise facial features, skin tone, hair, clothing, and expression faithfully. Do NOT replace them with generic or different people."
       : includeHuman
-        ? "All people MUST be Nigerian West African, dark skin, natural features, warm and relatable expressions. Do NOT generate people of other ethnicities."
+        ? "All people must be Nigerian West African, dark skin, natural features, warm and relatable expressions."
         : "DO NOT include any people, focus entirely on the products and environment.";
       
     let layoutSystem = "";
@@ -26,6 +26,12 @@ export async function POST(req: Request) {
     } else if (placement === "right") {
       layoutSystem = "The subject is positioned on the right side of the image. The rest of the background is a seamless, pure white or off-white photography studio backdrop to allow text overlay on the left.";
       layoutUser = "Layout: Place the main subjects on the RIGHT side of the composition. The background must be a seamless pure white or soft off-white photography studio backdrop, fading leftwards into pure empty space. NO busy backgrounds or hard split lines.";
+    } else if (placement === "collage") {
+      layoutSystem = "The subject is composed of a playful collage of multiple polaroid-style photos scattered and slightly overlapping in the center. The rest of the background is a seamless, pure white or soft off-white photography studio backdrop.";
+      layoutUser = "Layout: Create a collage composition. Show multiple printed photos with white borders scattered, rotated slightly, and overlapping each other in the center. The background must be a seamless pure white or soft off-white photography studio backdrop. Leave clean empty space at the top and bottom.";
+    } else if (placement === "list") {
+      layoutSystem = "The subjects are arranged in a vertical list formatting down the left side, resembling a product catalog. The right side is left completely empty with a pure white or soft off-white photography studio backdrop to allow for prominent text overlay.";
+      layoutUser = "Layout: Arrange the objects in a clean vertical stack down the LEFT side of the image, like a product catalog. The background must be a seamless pure white or soft off-white photography studio backdrop. Leave the entire RIGHT side completely empty and clean for text placement. NO busy backgrounds.";
     } else {
       layoutSystem = "The subject is centrally positioned against a seamless, pure white empty photography studio backdrop.";
       layoutUser = "Layout: Central subject placement. The background must be a seamless pure white or soft off-white photography studio backdrop with generous empty space all around. NO busy backgrounds or sharp division lines.";

@@ -180,13 +180,253 @@ export default function Home() {
       img.src = dataUri;
     });
 
+  // ── Client-side canvas composition for collage placement ──────────────────
+  const composeCollageImage = (dataUris: string[]): Promise<string> =>
+    new Promise(async (resolve, reject) => {
+      try {
+        const canvas = document.createElement("canvas");
+        const CANVAS_W = 1600;
+        const CANVAS_H = 2000;
+        canvas.width = CANVAS_W;
+        canvas.height = CANVAS_H;
+        const ctx = canvas.getContext("2d")!;
+        
+        // Fill white background (studio backdrop)
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
+
+        // Load all images
+        const imgs = await Promise.all(dataUris.map(uri => 
+          new Promise<HTMLImageElement>((res, rej) => {
+            const img = new Image();
+            img.onload = () => res(img);
+            img.onerror = rej;
+            img.src = uri;
+          })
+        ));
+
+        // Define collage bounds: a box in the middle of the canvas
+        // The user example has the collage roughly in the center
+        const cx = CANVAS_W / 2;
+        const cy = CANVAS_H / 2;
+
+        const maxN = Math.min(imgs.length, 6);
+
+        for (let i = 0; i < maxN; i++) {
+          const img = imgs[i];
+          ctx.save();
+          
+          let xOffset = 0;
+          let yOffset = 0;
+          let rot = 0;
+          
+          if (maxN === 1) {
+            rot = -2;
+          } else if (maxN === 2) {
+            xOffset = i === 0 ? -250 : 250;
+            yOffset = i === 0 ? -50 : 50;
+            rot = i === 0 ? -5 : 5;
+          } else if (maxN === 3) {
+            xOffset = i === 0 ? 0 : (i === 1 ? -250 : 250);
+            yOffset = i === 0 ? -250 : 150;
+            rot = i === 0 ? 2 : (i === 1 ? -6 : 8);
+          } else {
+            // 4 or more: 2x2 grid roughly scattered
+            const row = Math.floor((i % 4) / 2);
+            const col = (i % 4) % 2;
+            xOffset = col === 0 ? -280 : 280;
+            yOffset = row === 0 ? -280 : 280;
+            const rotations = [-8, 6, 7, -5, -4, 9];
+            rot = rotations[i % rotations.length];
+            // Add deterministic pseudo-random jitter
+            xOffset += (i * 23) % 80 - 40;
+            yOffset += (i * 37) % 80 - 40;
+          }
+
+          ctx.translate(cx + xOffset, cy + yOffset);
+          ctx.rotate((rot * Math.PI) / 180);
+
+          // "Polaroid" dimensions
+          const polaroidW = 600;
+          const polaroidH = 700;
+          
+          // Draw shadow
+          ctx.shadowColor = "rgba(0,0,0,0.2)";
+          ctx.shadowBlur = 30;
+          ctx.shadowOffsetY = 15;
+
+          // Draw white border
+          ctx.fillStyle = "#ffffff";
+          // x, y from center of polaroid
+          const px = -polaroidW / 2;
+          const py = -polaroidH / 2;
+          
+          // Little stroke for polaroid edge
+          ctx.strokeStyle = "#e2e8f0";
+          ctx.lineWidth = 1;
+          ctx.fillRect(px, py, polaroidW, polaroidH);
+          ctx.strokeRect(px, py, polaroidW, polaroidH);
+          
+          ctx.shadowColor = "transparent"; // reset shadow for image
+
+          // Draw image inside (cropped)
+          const margin = 24;
+          const imgBoxW = polaroidW - margin * 2;
+          const imgBoxH = polaroidH - margin * 2 - 80; // Extra bottom margin for polaroid look
+          
+          // Image crop
+          const boxRatio = imgBoxW / imgBoxH;
+          const imgRatio = img.width / img.height;
+          let sx, sy, sWidth, sHeight;
+
+          if (imgRatio > boxRatio) {
+            sHeight = img.height;
+            sWidth = img.height * boxRatio;
+            sx = (img.width - sWidth) / 2;
+            sy = 0;
+          } else {
+            sWidth = img.width;
+            sHeight = img.width / boxRatio;
+            sx = 0;
+            sy = (img.height - sHeight) / 2;
+          }
+
+          ctx.drawImage(img, sx, sy, sWidth, sHeight, px + margin, py + margin, imgBoxW, imgBoxH);
+          
+          ctx.restore();
+        }
+
+        resolve(canvas.toDataURL("image/jpeg", 0.9));
+      } catch (err) {
+        reject(err);
+      }
+    });
+
+  // ── Client-side canvas composition for list placement ─────────────────────
+  const composeListImage = (dataUris: string[]): Promise<string> =>
+    new Promise(async (resolve, reject) => {
+      try {
+        const canvas = document.createElement("canvas");
+        const CANVAS_W = 1600;
+        const CANVAS_H = 2000;
+        canvas.width = CANVAS_W;
+        canvas.height = CANVAS_H;
+        const ctx = canvas.getContext("2d")!;
+        
+        // Light grey background (matches the requested aesthetic)
+        ctx.fillStyle = "#f4f4f5";
+        ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
+
+        const imgs = await Promise.all(dataUris.map(uri => 
+          new Promise<HTMLImageElement>((res, rej) => {
+            const img = new Image();
+            img.onload = () => res(img);
+            img.onerror = rej;
+            img.src = uri;
+          })
+        ));
+
+        const maxN = Math.min(imgs.length, 5); // stack up to 5 items vertically
+        const startY = 240; // Leave space at the top for header/logos
+        const availableHeight = CANVAS_H - startY - 80;
+        const rowHeight = Math.floor(availableHeight / maxN);
+        const colWidth = Math.floor(CANVAS_W * 0.45); // Left 45% for images
+        
+        for (let i = 0; i < maxN; i++) {
+          const img = imgs[i];
+          const marginY = Math.min(40, rowHeight * 0.1); // dynamic margin
+          const marginX = 80;
+          
+          const rowX = marginX;
+          const rowY = startY + i * rowHeight + marginY;
+          const rowW = CANVAS_W - marginX * 2;
+          const rowH = rowHeight - marginY * 2;
+
+          // Draw the rounded box with a dashed border for the text/image section
+          ctx.save();
+          
+          // White background for the individual list item
+          ctx.fillStyle = "#ffffff";
+          ctx.shadowColor = "rgba(0,0,0,0.03)";
+          ctx.shadowBlur = 10;
+          ctx.shadowOffsetY = 4;
+
+          const radius = 12;
+          ctx.beginPath();
+          ctx.moveTo(rowX + radius, rowY);
+          ctx.arcTo(rowX + rowW, rowY, rowX + rowW, rowY + rowH, radius);
+          ctx.arcTo(rowX + rowW, rowY + rowH, rowX, rowY + rowH, radius);
+          ctx.arcTo(rowX, rowY + rowH, rowX, rowY, radius);
+          ctx.arcTo(rowX, rowY, rowX + rowW, rowY, radius);
+          ctx.closePath();
+          ctx.fill();
+          
+          ctx.shadowColor = "transparent";
+          
+          // Blue dashed border like the reference image
+          ctx.strokeStyle = "#82A9C9"; // Muted light blue
+          ctx.lineWidth = 2;
+          ctx.setLineDash([12, 10]);
+          ctx.stroke();
+          ctx.restore();
+
+          // Image box bounds inside the row
+          const imgMarginX = 60;
+          const imgMarginY = 30;
+          const boxX = rowX + imgMarginX;
+          const boxY = rowY + imgMarginY;
+          const boxW = colWidth - imgMarginX * 2;
+          const boxH = rowH - imgMarginY * 2;
+
+          const boxRatio = boxW / boxH;
+          const imgRatio = img.width / img.height;
+          let drawW, drawH, drawX, drawY;
+
+          // Fit image entirely inside its box (object-fit: contain)
+          if (imgRatio > boxRatio) {
+            drawW = boxW;
+            drawH = boxW / imgRatio;
+            drawX = boxX;
+            drawY = boxY + (boxH - drawH) / 2;
+          } else {
+            drawH = boxH;
+            drawW = boxH * imgRatio;
+            drawX = boxX + (boxW - drawW) / 2;
+            drawY = boxY;
+          }
+
+          // Optional subtle product shadow
+          ctx.save();
+          ctx.shadowColor = "rgba(0,0,0,0.15)";
+          ctx.shadowBlur = 20;
+          ctx.shadowOffsetY = 15;
+          ctx.drawImage(img, 0, 0, img.width, img.height, drawX, drawY, drawW, drawH);
+          ctx.restore();
+        }
+
+        resolve(canvas.toDataURL("image/jpeg", 0.9));
+      } catch (err) {
+        reject(err);
+      }
+    });
+
+
   // ── Pipeline for a single image slot (uses snapshotted form values) ───────
-  const generateOne = async (id: number, snap: FormSnapshot, directImageUrl?: string) => {
+  const generateOne = async (id: number, snap: FormSnapshot, directImageUrl?: string | string[]) => {
     try {
       // ── Exact-reference shortcut: skip AI, use the image directly ─────────
       if (snap.useExactReference && directImageUrl) {
         updateSlot(id, { status: "generating" });
-        const composedDataUri = await composeExactImage(directImageUrl, snap.placement);
+        let composedDataUri: string;
+        if (Array.isArray(directImageUrl)) {
+          if (snap.placement === "list") {
+            composedDataUri = await composeListImage(directImageUrl);
+          } else {
+            composedDataUri = await composeCollageImage(directImageUrl);
+          }
+        } else {
+          composedDataUri = await composeExactImage(directImageUrl, snap.placement);
+        }
         updateSlot(id, {
           imageUrl: composedDataUri,
           prompt: `(Exact reference placed at ${snap.placement} — no AI generation)`,
@@ -248,21 +488,35 @@ export default function Home() {
       useExactReference,
     };
 
-    // ── Exact-reference mode: one output slot per uploaded reference image ──
+    // ── Enforce exact reference for array-based layouts if there are reference images ──
+    if ((snap.placement === "collage" || snap.placement === "list") && snap.referenceImages.length > 0) {
+      snap.useExactReference = true;
+    }
+
+    // ── Exact-reference mode: either one output slot per uploaded reference image, or single combined output ──
     if (snap.useExactReference && snap.referenceImages.length > 0) {
       batchCounter.current += 1;
       const thisBatchId = batchCounter.current;
       const thisBatchLabel = `Batch ${thisBatchId}`;
 
-      const newSlots: ImageSlot[] = snap.referenceImages.map(() => {
+      if (snap.placement === "collage" || snap.placement === "list") {
         const id = slotCounter.current++;
-        return { id, batchId: thisBatchId, batchLabel: thisBatchLabel, status: "pending", prompt: null, imageUrl: null, error: null };
-      });
+        const newSlot: ImageSlot = { id, batchId: thisBatchId, batchLabel: thisBatchLabel, status: "pending", prompt: null, imageUrl: null, error: null };
+        setSlots((prev) => [newSlot, ...prev]);
+        setActiveBatches((n) => n + 1);
+        await Promise.allSettled([generateOne(newSlot.id, snap, snap.referenceImages)]);
+        setActiveBatches((n) => n - 1);
+      } else {
+        const newSlots: ImageSlot[] = snap.referenceImages.map(() => {
+          const id = slotCounter.current++;
+          return { id, batchId: thisBatchId, batchLabel: thisBatchLabel, status: "pending", prompt: null, imageUrl: null, error: null };
+        });
 
-      setSlots((prev) => [...newSlots, ...prev]);
-      setActiveBatches((n) => n + 1);
-      await Promise.allSettled(newSlots.map((s, i) => generateOne(s.id, snap, snap.referenceImages[i])));
-      setActiveBatches((n) => n - 1);
+        setSlots((prev) => [...newSlots, ...prev]);
+        setActiveBatches((n) => n + 1);
+        await Promise.allSettled(newSlots.map((s, i) => generateOne(s.id, snap, snap.referenceImages[i])));
+        setActiveBatches((n) => n - 1);
+      }
       return;
     }
 
@@ -641,6 +895,8 @@ export default function Home() {
                 <option value="top">Top Theme (Bottom is empty)</option>
                 <option value="left">Left Theme (Right is empty)</option>
                 <option value="right">Right Theme (Left is empty)</option>
+                <option value="collage">Collage (Scattered Polaroids over Center)</option>
+                <option value="list">List (Vertical Stack on Left)</option>
                 <option value="center">Center / Custom</option>
               </select>
             </div>
