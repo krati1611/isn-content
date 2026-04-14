@@ -65,7 +65,7 @@ export async function POST(req: Request) {
       replicateInputs.image_input = [];
     }
 
-    let repRes = await fetch("https://api.replicate.com/v1/models/google/nano-banana-2/predictions", {
+    let repRes = await fetch("https://api.replicate.com/v1/models/google/nano-banana-pro/predictions", {
       method: "POST",
       headers: {
         "Authorization": `Bearer ${REPLICATE_API_TOKEN}`,
@@ -81,9 +81,9 @@ export async function POST(req: Request) {
     // Instead of long-polling here on the server, we return the prediction ID.
     // The client will poll the status. This prevents the browser from dropping
     // the connection when the tab is placed in the background.
-    return NextResponse.json({ 
-      status: repData.status, 
-      predictionId: repData.id 
+    return NextResponse.json({
+      status: repData.status,
+      predictionId: repData.id
     });
   } catch (error: any) {
     console.error(error);
