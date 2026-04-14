@@ -1,11 +1,12 @@
 import { NextResponse } from 'next/server';
 
-export async function GET(req: Request, { params }: { params: { id: string } }) {
+export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
+    const { id } = await params;
     const REPLICATE_API_TOKEN = process.env.REPLICATE_API_TOKEN!;
     
     // Using predictionId from params.id to poll Replicate for status
-    const repRes = await fetch(`https://api.replicate.com/v1/predictions/${params.id}`, {
+    const repRes = await fetch(`https://api.replicate.com/v1/predictions/${id}`, {
       headers: { "Authorization": `Bearer ${REPLICATE_API_TOKEN}` }
     });
     
