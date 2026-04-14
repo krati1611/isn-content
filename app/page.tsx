@@ -455,7 +455,7 @@ export default function Home() {
 
       updateSlot(id, { prompt: data1.prompt, status: "generating" });
 
-      // Step 2 – image
+      // Step 2 – image (Start Generation)
       const res2 = await fetch("/api/generate-image", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -465,9 +465,38 @@ export default function Home() {
         }),
       });
       const data2 = await res2.json();
-      if (!res2.ok) throw new Error(data2.error || "Failed to generate image");
+      if (!res2.ok) throw new Error(data2.error || "Failed to start image generation");
 
-      updateSlot(id, { imageUrl: data2.imageUrl, status: "done" });
+      let apiStatus = data2.status;
+      let finalImageUrl = null;
+      const predictionId = data2.predictionId;
+
+      if (!predictionId) {
+         throw new Error("No prediction ID returned from server.");
+      }
+
+      // Step 3 - Poll for completion
+      while (apiStatus === "starting" || apiStatus === "processing") {
+         await new Promise(resolve => setTimeout(resolve, 3000));
+         const pollRes = await fetch(`/api/generate-image/${predictionId}`);
+         const pollData = await pollRes.json();
+         
+         if (!pollRes.ok) throw new Error(pollData.error || "Failed to poll image status");
+         
+         apiStatus = pollData.status;
+         
+         if (apiStatus === "succeeded") {
+             finalImageUrl = pollData.imageUrl;
+         } else if (apiStatus === "failed") {
+             throw new Error(pollData.error || "Generation failed on Replicate.");
+         }
+      }
+
+      if (!finalImageUrl) {
+        throw new Error("Generation finished but no image returned");
+      }
+
+      updateSlot(id, { imageUrl: finalImageUrl, status: "done" });
     } catch (err: any) {
       updateSlot(id, { error: err.message, status: "error" });
     }
