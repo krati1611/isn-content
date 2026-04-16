@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import "./globals.css";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -15,6 +15,7 @@ type ImageSlot = {
 };
 
 type FormSnapshot = {
+  client: string;
   idea: string;
   hook: string;
   goal: string;
@@ -26,6 +27,7 @@ type FormSnapshot = {
 
 // ─── Component ────────────────────────────────────────────────────────────────
 export default function Home() {
+  const [client, setClient] = useState("isn");
   const [idea, setIdea] = useState("");
   const [hook, setHook] = useState("");
   const [goal, setGoal] = useState("");
@@ -47,6 +49,29 @@ export default function Home() {
   const batchCounter = useRef(0);
 
   const fileInputRefs = useRef<(HTMLInputElement | null)[]>([]);
+
+  // ── Dynamic Placeholders ──────────────────────────────────────────────────
+  const isnPlaceholders = [
+    "e.g. A patient getting results from a friendly nurse…",
+    "e.g. A modern lab with high-tech diagnostic equipment…",
+    "e.g. A happy family receiving a medical checkup…"
+  ];
+  const yoaPlaceholders = [
+    "e.g. An oil and gas worker showing reliability…",
+    "e.g. A business professional securing their company's future…",
+    "e.g. A young family feeling protected by comprehensive insurance…"
+  ];
+  const [placeholderIdx, setPlaceholderIdx] = useState(0);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setPlaceholderIdx((prev) => prev + 1);
+    }, 4000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const currentPlaceholderList = client === "yoa" ? yoaPlaceholders : isnPlaceholders;
+  const currentPlaceholder = currentPlaceholderList[placeholderIdx % currentPlaceholderList.length];
 
   // ── Helpers ───────────────────────────────────────────────────────────────
   const updateSlot = (id: number, patch: Partial<ImageSlot>) => {
@@ -411,6 +436,63 @@ export default function Home() {
     });
 
 
+  // ── YOA Frame Overlay ───────────────────────────────────────────────────────
+  const applyYoaFrame = (sourceUrl: string): Promise<string> =>
+    new Promise((resolve, reject) => {
+      const img = new Image();
+      img.crossOrigin = "anonymous";
+      img.onerror = reject;
+      img.onload = () => {
+        const canvas = document.createElement("canvas");
+        const w = img.width;
+        const h = img.height;
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext("2d")!;
+        
+        ctx.drawImage(img, 0, 0, w, h);
+
+        const thickness = Math.max(6, Math.round(w * 0.008));
+        const margin = thickness / 2; // For the stroke to touch the very edge exactly
+        
+        const gradient = ctx.createLinearGradient(0, 0, w, 0);
+        gradient.addColorStop(0, "#0F684F");
+        gradient.addColorStop(1, "#84BD00");
+
+        ctx.strokeStyle = gradient;
+        ctx.lineWidth = thickness;
+        
+        const x = margin;
+        const y = margin;
+        const boxW = w - thickness;
+        const boxH = h - thickness;
+
+        const cornerGapW = w * 0.35; // Gap width for logo in bottom right
+        const cornerGapH = h * 0.15; // Gap height for logo in bottom right
+        
+        ctx.beginPath();
+        // Start from top-left corner
+        ctx.moveTo(x, y);
+        // Left edge down to bottom-left
+        ctx.lineTo(x, y + boxH);
+        // Bottom edge towards right, stopping before the bottom-right gap
+        ctx.lineTo(x + boxW - cornerGapW, y + boxH);
+        ctx.stroke();
+
+        ctx.beginPath();
+        // Start from right edge, above the bottom-right gap
+        ctx.moveTo(x + boxW, y + boxH - cornerGapH);
+        // Right edge up to top-right
+        ctx.lineTo(x + boxW, y);
+        // Top edge left towards top-left
+        ctx.lineTo(x, y);
+        ctx.stroke();
+
+        resolve(canvas.toDataURL("image/jpeg", 0.95));
+      };
+      img.src = sourceUrl;
+    });
+
   // ── Pipeline for a single image slot (uses snapshotted form values) ───────
   const generateOne = async (id: number, snap: FormSnapshot, directImageUrl?: string | string[]) => {
     try {
@@ -427,6 +509,13 @@ export default function Home() {
         } else {
           composedDataUri = await composeExactImage(directImageUrl, snap.placement);
         }
+        if (snap.client === "yoa") {
+          try {
+            composedDataUri = await applyYoaFrame(composedDataUri);
+          } catch (e) {
+            console.error("YOA Frame overlay failed:", e);
+          }
+        }
         updateSlot(id, {
           imageUrl: composedDataUri,
           prompt: `(Exact reference placed at ${snap.placement} — no AI generation)`,
@@ -442,6 +531,7 @@ export default function Home() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          client: snap.client,
           idea: snap.idea,
           hook: snap.hook,
           goal: snap.goal,
@@ -496,6 +586,14 @@ export default function Home() {
         throw new Error("Generation finished but no image returned");
       }
 
+      if (snap.client === "yoa") {
+        try {
+          finalImageUrl = await applyYoaFrame(finalImageUrl);
+        } catch (e) {
+          console.error("YOA Frame overlay failed:", e);
+        }
+      }
+
       updateSlot(id, { imageUrl: finalImageUrl, status: "done" });
     } catch (err: any) {
       updateSlot(id, { error: err.message, status: "error" });
@@ -508,6 +606,7 @@ export default function Home() {
 
     // Snapshot the form values at this moment in time
     const snap: FormSnapshot = {
+      client,
       idea,
       hook,
       goal,
@@ -585,14 +684,14 @@ export default function Home() {
     <>
       {/* ── Global styles injected inline for portability ── */}
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&display=swap');
 
         *, *::before, *::after { box-sizing: border-box; }
 
         .page-wrap {
-          font-family: 'Inter', sans-serif;
+          font-family: 'Outfit', -apple-system, sans-serif;
           min-height: 100vh;
-          background: #0D1B2A;
+          background: #F4F7F6;
           padding: 2rem 1rem 4rem;
         }
 
@@ -600,11 +699,11 @@ export default function Home() {
         .form-card {
           max-width: 580px;
           margin: 0 auto 3rem;
-          background: linear-gradient(145deg, #13273D, #0f2035);
-          border: 1px solid rgba(255,255,255,0.07);
+          background: #FFFFFF;
+          border: 1px solid rgba(0,0,0,0.06);
           border-radius: 20px;
           padding: 2.5rem;
-          box-shadow: 0 24px 60px rgba(0,0,0,0.5);
+          box-shadow: 0 12px 40px rgba(0,0,0,0.04);
         }
 
         .form-title {
@@ -613,30 +712,31 @@ export default function Home() {
           font-weight: 700;
           letter-spacing: -0.02em;
           margin: 0 0 2rem;
-          background: linear-gradient(90deg, #00A1D7, #E95345);
+          background: linear-gradient(90deg, #0f684f, #00A1D7);
           -webkit-background-clip: text;
           -webkit-text-fill-color: transparent;
           background-clip: text;
         }
 
         .field { display: flex; flex-direction: column; gap: 0.45rem; }
-        .field label { font-size: 0.82rem; font-weight: 600; color: #94a3b8; letter-spacing: 0.05em; text-transform: uppercase; }
+        .field label { font-size: 0.82rem; font-weight: 600; color: #64748b; letter-spacing: 0.05em; text-transform: uppercase; }
         .field textarea, .field input[type=text], .field select, .field input[type=email] {
-          background: rgba(255,255,255,0.05);
-          border: 1px solid rgba(255,255,255,0.1);
+          background: #F8FAFC;
+          border: 1.5px solid #E2E8F0;
           border-radius: 10px;
-          color: #fff;
+          color: #1e293b;
           padding: 0.75rem 1rem;
           font-size: 0.95rem;
           font-family: inherit;
-          transition: border-color 0.2s;
+          transition: all 0.2s;
           resize: vertical;
           outline: none;
         }
         .field textarea:focus, .field input:focus, .field select:focus {
-          border-color: #00A1D7;
+          border-color: #0F684F;
+          box-shadow: 0 0 0 4px rgba(15, 104, 79, 0.1);
         }
-        .field select option { background: #0D1B2A; }
+        .field select option { background: #FFFFFF; }
 
         .field-row { display: flex; gap: 1.2rem; }
         .field-row .field { flex: 1; }
@@ -646,13 +746,13 @@ export default function Home() {
           align-items: center;
           gap: 0.6rem;
           font-size: 0.9rem;
-          color: #cbd5e1;
+          color: #475569;
           cursor: pointer;
           user-select: none;
         }
         .checkbox-row input[type=checkbox] {
           width: 18px; height: 18px;
-          accent-color: #00A1D7;
+          accent-color: #0F684F;
           cursor: pointer;
         }
 
@@ -662,19 +762,19 @@ export default function Home() {
           flex: 1;
           padding: 0.45rem;
           border-radius: 8px;
-          border: 1.5px solid rgba(255,255,255,0.12);
+          border: 1.5px solid #E2E8F0;
           background: transparent;
-          color: #94a3b8;
+          color: #64748b;
           font-size: 0.95rem;
           font-weight: 600;
           cursor: pointer;
           transition: all 0.15s;
         }
-        .num-pill:hover { border-color: #00A1D7; color: #fff; }
+        .num-pill:hover { border-color: #0F684F; color: #0F684F; background: rgba(15,104,79,0.05); }
         .num-pill.active {
-          border-color: #00A1D7;
-          background: rgba(0,161,215,0.15);
-          color: #00A1D7;
+          border-color: #0F684F;
+          background: rgba(15,104,79,0.1);
+          color: #0F684F;
         }
 
         /* file upload */
@@ -682,21 +782,21 @@ export default function Home() {
           display: flex;
           align-items: center;
           gap: 0.6rem;
-          background: rgba(255,255,255,0.05);
-          border: 1.5px dashed rgba(255,255,255,0.15);
+          background: #F8FAFC;
+          border: 1.5px dashed #CBD5E1;
           border-radius: 10px;
           padding: 0.7rem 1rem;
           cursor: pointer;
           font-size: 0.9rem;
-          color: #94a3b8;
-          transition: border-color 0.2s, color 0.2s;
+          color: #64748b;
+          transition: all 0.2s;
         }
-        .file-label:hover { border-color: #00A1D7; color: #fff; }
+        .file-label:hover { border-color: #0F684F; color: #0F684F; background: rgba(15,104,79,0.02); }
         .ref-preview {
           width: 48px; height: 48px;
           border-radius: 8px;
           object-fit: cover;
-          border: 1.5px solid rgba(0,161,215,0.4);
+          border: 1.5px solid rgba(15, 104, 79, 0.2);
         }
 
         /* submit button */
@@ -705,7 +805,7 @@ export default function Home() {
           padding: 1rem;
           border: none;
           border-radius: 12px;
-          background: linear-gradient(135deg, #E95345, #c43e32);
+          background: linear-gradient(135deg, #0F684F, #84BD00);
           color: #fff;
           font-size: 1rem;
           font-weight: 700;
@@ -713,23 +813,24 @@ export default function Home() {
           cursor: pointer;
           position: relative;
           overflow: hidden;
-          transition: opacity 0.2s, transform 0.15s;
+          transition: opacity 0.2s, transform 0.15s, box-shadow 0.2s;
           margin-top: 0.5rem;
+          box-shadow: 0 8px 20px rgba(132, 189, 0, 0.25);
         }
-        .submit-btn:hover:not(:disabled) { opacity: 0.92; transform: translateY(-1px); }
-        .submit-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+        .submit-btn:hover:not(:disabled) { opacity: 0.95; transform: translateY(-2px); box-shadow: 0 12px 25px rgba(132, 189, 0, 0.35); }
+        .submit-btn:disabled { opacity: 0.6; cursor: not-allowed; transform: none; box-shadow: none; }
 
         /* progress bar under button */
         .progress-bar-wrap {
-          height: 3px;
-          background: rgba(255,255,255,0.08);
+          height: 4px;
+          background: #E2E8F0;
           border-radius: 2px;
           overflow: hidden;
           margin-top: 0.5rem;
         }
         .progress-bar-fill {
           height: 100%;
-          background: linear-gradient(90deg, #00A1D7, #E95345);
+          background: linear-gradient(90deg, #0F684F, #84BD00);
           border-radius: 2px;
           transition: width 0.5s ease;
         }
@@ -739,10 +840,10 @@ export default function Home() {
         .results-heading {
           text-align: center;
           font-size: 1.1rem;
-          color: #94a3b8;
+          color: #64748b;
           margin-bottom: 1.5rem;
         }
-        .results-heading strong { color: #fff; }
+        .results-heading strong { color: #1e293b; }
 
         .image-grid {
           display: grid;
@@ -752,12 +853,12 @@ export default function Home() {
 
         /* ── Image card ── */
         .img-card {
-          background: linear-gradient(145deg, #13273D, #0f2035);
-          border: 1px solid rgba(255,255,255,0.07);
+          background: #FFFFFF;
+          border: 1px solid rgba(0,0,0,0.06);
           border-radius: 16px;
           overflow: hidden;
           position: relative;
-          box-shadow: 0 8px 30px rgba(0,0,0,0.35);
+          box-shadow: 0 8px 30px rgba(0,0,0,0.06);
           animation: cardAppear 0.4s cubic-bezier(0.16, 1, 0.3, 1);
         }
         @keyframes cardAppear {
@@ -768,22 +869,23 @@ export default function Home() {
         .img-badge {
           position: absolute;
           top: 10px; left: 10px;
-          background: rgba(0,0,0,0.55);
+          background: rgba(255,255,255,0.85);
           backdrop-filter: blur(8px);
           border-radius: 6px;
           font-size: 0.7rem;
           font-weight: 700;
-          color: #fff;
+          color: #1e293b;
           padding: 3px 8px;
           letter-spacing: 0.05em;
           z-index: 2;
+          box-shadow: 0 2px 10px rgba(0,0,0,0.05);
         }
 
         /* shimmer skeleton */
         .shimmer {
           width: 100%;
           aspect-ratio: 4/5;
-          background: linear-gradient(90deg, rgba(255,255,255,0.04) 25%, rgba(255,255,255,0.09) 50%, rgba(255,255,255,0.04) 75%);
+          background: linear-gradient(90deg, #F1F5F9 25%, #E2E8F0 50%, #F1F5F9 75%);
           background-size: 200% 100%;
           animation: shimmer 1.4s infinite;
         }
@@ -795,25 +897,26 @@ export default function Home() {
         .img-status {
           position: absolute;
           bottom: 0; left: 0; right: 0;
-          background: rgba(10,20,35,0.75);
-          backdrop-filter: blur(8px);
+          background: rgba(255,255,255,0.85);
+          backdrop-filter: blur(12px);
           padding: 0.65rem 1rem;
           display: flex;
           align-items: center;
           gap: 0.5rem;
           font-size: 0.8rem;
-          color: #94a3b8;
+          color: #475569;
+          border-top: 1px solid rgba(0,0,0,0.05);
         }
         .status-dot {
-          width: 7px; height: 7px;
+          width: 8px; height: 8px;
           border-radius: 50%;
           flex-shrink: 0;
         }
-        .status-dot.pending   { background: #475569; }
-        .status-dot.prompting { background: #00A1D7; animation: pulse 1s infinite; }
-        .status-dot.generating { background: #f59e0b; animation: pulse 1s infinite; }
-        .status-dot.done      { background: #22c55e; }
-        .status-dot.error     { background: #E95345; }
+        .status-dot.pending   { background: #94A3B8; }
+        .status-dot.prompting { background: #3B82F6; animation: pulse 1s infinite; }
+        .status-dot.generating { background: #F59E0B; animation: pulse 1s infinite; }
+        .status-dot.done      { background: #10B981; }
+        .status-dot.error     { background: #EF4444; }
         @keyframes pulse {
           0%, 100% { opacity: 1; transform: scale(1); }
           50%       { opacity: 0.4; transform: scale(0.7); }
@@ -837,27 +940,30 @@ export default function Home() {
           display: block;
           margin: 0.75rem auto 0.9rem;
           padding: 0.5rem 1.1rem;
-          background: rgba(0,161,215,0.15);
-          border: 1.5px solid rgba(0,161,215,0.4);
+          background: rgba(15, 104, 79, 0.08);
+          border: 1.5px solid rgba(15, 104, 79, 0.2);
           border-radius: 8px;
-          color: #00A1D7;
+          color: #0F684F;
           font-size: 0.8rem;
           font-weight: 600;
           text-decoration: none;
-          transition: background 0.2s;
+          transition: all 0.2s;
           width: calc(100% - 1.5rem);
           text-align: center;
           cursor: pointer;
         }
-        .dl-btn:hover { background: rgba(0,161,215,0.25); }
+        .dl-btn:hover { 
+          background: rgba(15, 104, 79, 0.15); 
+          transform: translateY(-1px);
+        }
 
         /* error card */
         .error-box {
           padding: 1rem;
-          background: rgba(233,83,69,0.1);
-          border: 1px solid rgba(233,83,69,0.3);
+          background: #FEF2F2;
+          border: 1px solid #FCA5A5;
           border-radius: 8px;
-          color: #fca5a5;
+          color: #B91C1C;
           font-size: 0.82rem;
           margin: 0.75rem;
         }
@@ -865,11 +971,11 @@ export default function Home() {
         .global-error {
           max-width: 580px;
           margin: -1.5rem auto 1rem;
-          background: rgba(233,83,69,0.1);
-          border: 1px solid rgba(233,83,69,0.3);
+          background: #FEF2F2;
+          border: 1px solid #FCA5A5;
           border-radius: 10px;
           padding: 0.8rem 1rem;
-          color: #fca5a5;
+          color: #B91C1C;
           font-size: 0.88rem;
         }
 
@@ -879,9 +985,18 @@ export default function Home() {
       <div className="page-wrap">
         {/* ── Form Card ── */}
         <div className="form-card">
-          <h1 className="form-title">ISN Content Automation</h1>
+          <h1 className="form-title">Pedicel Content System</h1>
 
           <form onSubmit={handleSubmit} className="form-stack">
+            {/* Client */}
+            <div className="field">
+              <label>Client</label>
+              <select value={client} onChange={(e) => setClient(e.target.value)}>
+                <option value="isn">ISN</option>
+                <option value="yoa">YOA</option>
+              </select>
+            </div>
+
             {/* Concept */}
             <div className="field">
               <label>Concept Idea</label>
@@ -890,7 +1005,7 @@ export default function Home() {
                 onChange={(e) => setIdea(e.target.value)}
                 required
                 rows={3}
-                placeholder="e.g. A patient getting results from a friendly nurse…"
+                placeholder={currentPlaceholder}
               />
             </div>
 
@@ -1024,10 +1139,10 @@ export default function Home() {
                   style={{
                     marginTop: "0.6rem",
                     padding: "0.6rem 0.85rem",
-                    background: useExactReference ? "rgba(0,161,215,0.1)" : "rgba(255,255,255,0.03)",
-                    border: `1.5px solid ${useExactReference ? "rgba(0,161,215,0.45)" : "rgba(255,255,255,0.08)"}`,
-                    borderRadius: "9px",
-                    transition: "background 0.2s, border-color 0.2s",
+                    background: useExactReference ? "rgba(15, 104, 79, 0.06)" : "#F8FAFC",
+                    border: `1.5px solid ${useExactReference ? "rgba(15, 104, 79, 0.3)" : "#E2E8F0"}`,
+                    borderRadius: "10px",
+                    transition: "all 0.2s",
                   }}
                 >
                   <input
@@ -1036,7 +1151,7 @@ export default function Home() {
                     onChange={(e) => setUseExactReference(e.target.checked)}
                   />
                   <span>
-                    <strong style={{ color: useExactReference ? "#00A1D7" : "#cbd5e1" }}>Use exact reference image(s)</strong>
+                    <strong style={{ color: useExactReference ? "#0F684F" : "#475569" }}>Use exact reference image(s)</strong>
                     <span style={{ display: "block", fontSize: "0.75rem", color: "#64748b", marginTop: "2px" }}>
                       Skip AI generation — output the uploaded image(s) directly
                     </span>
