@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server';
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    const { client, idea, hook, goal, placement, includeHuman, hasReferenceImages } = body;
+    const { client, idea, hook, goal, placement, includeHuman, hasReferenceImages, yoaBgColor } = body;
 
     // When reference images contain people, override generic person rule with fidelity instruction
     const personRule = hasReferenceImages && includeHuman
@@ -11,15 +11,20 @@ export async function POST(req: Request) {
       : includeHuman
         ? "All people must be Nigerian West African, dark skin, natural features, warm and relatable expressions."
         : "DO NOT include any people, focus entirely on the products and environment.";
-      
-    const bgSystem = client === "yoa" 
-      ? "a realistic, natural environment suited to the idea (e.g. out-of-focus office space, sky, or outdoor setting)"
+
+    // Build an optional colour-tone hint for YOA backgrounds
+    const bgColorHint = (client === "yoa" && yoaBgColor)
+      ? ` The dominant colour tone of the background/environment should be ${yoaBgColor} — use this as the key environmental colour, keeping it realistic and not artificially saturated.`
+      : "";
+
+    const bgSystem = client === "yoa"
+      ? `a realistic, natural environment suited to the idea (e.g. out-of-focus office space, sky, or outdoor setting)${bgColorHint}`
       : "a seamless, pure white or off-white photography studio backdrop";
-    
+
     const bgUser = client === "yoa"
-      ? "a realistic and natural environment based on the prompt idea"
+      ? `a realistic and natural environment based on the prompt idea${bgColorHint}`
       : "a seamless pure white or soft off-white photography studio backdrop";
-      
+
     const emptyUser = client === "yoa"
       ? "clean, uncluttered negative space within the scene's environment (e.g., clear sky or smoothed blurred wall). NO busy patterns or distracting visual clutter in the empty area."
       : "pure empty space. NO busy backgrounds or hard split lines.";
@@ -57,9 +62,8 @@ export async function POST(req: Request) {
     let userMessage = "";
 
     if (client === "yoa") {
-      systemMessage = `You are a brand visual strategist for YOA Insurance Brokers, a premium Nigerian insurance and risk management company. Your job is to generate highly detailed AI image prompts for Replicate. Output only the final image prompt, nothing else. Never include text, labels, logos or watermarks. ${layoutSystem}${
-        hasReferenceImages ? " " + referenceRule : ""
-      }`;
+      systemMessage = `You are a brand visual strategist for YOA Insurance Brokers, a premium Nigerian insurance and risk management company. Your job is to generate highly detailed AI image prompts for Replicate. Output only the final image prompt, nothing else. Never include text, labels, logos or watermarks. ${layoutSystem}${hasReferenceImages ? " " + referenceRule : ""
+        }`;
 
       // YOA brand rules
       userMessage = `Brand: YOA Insurance Brokers
@@ -68,7 +72,8 @@ Brand Core Values: Dependability, Trust, Stability, Competence, Creativity, Coll
 Brand Identity: Clear, supportive, informative, and human-centered. Balances professionalism with approachability. Reliable risk management and insurance specialists.
 Post Idea: ${idea}
 Hook: ${hook}
-Goal: ${goal}
+Goal: ${goal}${yoaBgColor ? `
+Background Colour: ${yoaBgColor} — build the scene's environment and lighting palette primarily around this colour tone.` : ""}
 
 Create a portrait format base image with these exact rules:
 1. ${layoutUser}
@@ -84,9 +89,8 @@ Create a portrait format base image with these exact rules:
 11. Reference image_input for people, style or product details if provided${hasReferenceImages ? `
 12. STRICT FIDELITY RULE: Use ONLY what is visible in the reference images. Reproduce exact people (face, skin tone, hair, outfit, expression), exact products and exact equipment. Do NOT substitute, add, or invent anything — not a different person, not extra props, not different devices. The output must look like the reference people are placed into a new studio setting.` : ``}`;
     } else {
-      systemMessage = `You are a brand visual strategist for ISN Medical, a premium Nigerian medical diagnostics company. Your job is to generate highly detailed AI image prompts for Replicate. Output only the final image prompt, nothing else. Never include text, labels, logos or watermarks. ${layoutSystem}${
-        hasReferenceImages ? " " + referenceRule : ""
-      }`;
+      systemMessage = `You are a brand visual strategist for ISN Medical, a premium Nigerian medical diagnostics company. Your job is to generate highly detailed AI image prompts for Replicate. Output only the final image prompt, nothing else. Never include text, labels, logos or watermarks. ${layoutSystem}${hasReferenceImages ? " " + referenceRule : ""
+        }`;
 
       userMessage = `Brand: ISN Medical
 Primary Colours: ISN Red #E95345, ISN Blue #00A1D7
@@ -128,7 +132,7 @@ Create a portrait format base image with these exact rules:
         max_tokens: 1000
       })
     });
-    
+
     if (!groqRes.ok) throw new Error("Groq API Error: " + await groqRes.text());
     const groqData = await groqRes.json();
     const imagePrompt = groqData.choices[0].message.content;

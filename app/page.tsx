@@ -23,6 +23,7 @@ type FormSnapshot = {
   includeHuman: boolean;
   referenceImages: string[];
   useExactReference: boolean;
+  yoaBgColor: string | null;
 };
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -37,6 +38,12 @@ export default function Home() {
   const [referenceImages, setReferenceImages] = useState<(string | null)[]>([null]);
   const [useExactReference, setUseExactReference] = useState(false);
   const [numImages, setNumImages] = useState(1);
+  const [yoaBgColor, setYoaBgColor] = useState<string | null>(null);
+
+  // ── Tweak mode state ──────────────────────────────────────────────────────
+  const [tweakMode, setTweakMode] = useState(false);
+  const [tweakImage, setTweakImage] = useState<string | null>(null);
+  const [tweakInstruction, setTweakInstruction] = useState("");
 
   // All slots from every batch ever submitted — grows monotonically
   const [slots, setSlots] = useState<ImageSlot[]>([]);
@@ -49,6 +56,7 @@ export default function Home() {
   const batchCounter = useRef(0);
 
   const fileInputRefs = useRef<(HTMLInputElement | null)[]>([]);
+  const tweakFileInputRef = useRef<HTMLInputElement | null>(null);
 
   // ── Dynamic Placeholders ──────────────────────────────────────────────────
   const isnPlaceholders = [
@@ -538,6 +546,7 @@ export default function Home() {
           placement: snap.placement,
           includeHuman: snap.includeHuman,
           hasReferenceImages: snap.referenceImages.length > 0,
+          yoaBgColor: snap.yoaBgColor,
         }),
       });
       const data1 = await res1.json();
@@ -600,9 +609,71 @@ export default function Home() {
     }
   };
 
+  // ── Tweak pipeline: send image + instruction to FLUX Kontext, then poll ───
+  const generateTweakOne = async (id: number, imageDataUri: string, instruction: string, applyYoa: boolean) => {
+    try {
+      updateSlot(id, { status: "generating", prompt: instruction });
+
+      // Step 1 — Start the Kontext edit
+      const res = await fetch("/api/tweak-image", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ imageDataUri, instruction }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to start tweak");
+
+      const predictionId = data.predictionId;
+      if (!predictionId) throw new Error("No prediction ID returned from tweak server.");
+
+      // Step 2 — Poll for completion (same route as normal generate)
+      let apiStatus = data.status;
+      let finalImageUrl: string | null = null;
+
+      while (apiStatus === "starting" || apiStatus === "processing") {
+        await new Promise((r) => setTimeout(r, 3000));
+        const pollRes = await fetch(`/api/generate-image/${predictionId}`);
+        const pollData = await pollRes.json();
+        if (!pollRes.ok) throw new Error(pollData.error || "Failed to poll tweak status");
+        apiStatus = pollData.status;
+        if (apiStatus === "succeeded") finalImageUrl = pollData.imageUrl;
+        else if (apiStatus === "failed") throw new Error(pollData.error || "Tweak generation failed.");
+      }
+
+      if (!finalImageUrl) throw new Error("Tweak finished but no image returned.");
+
+      // Step 3 — Apply YOA frame if client = YOA
+      if (applyYoa) {
+        try { finalImageUrl = await applyYoaFrame(finalImageUrl); }
+        catch (e) { console.error("YOA Frame overlay failed on tweak:", e); }
+      }
+
+      updateSlot(id, { imageUrl: finalImageUrl, status: "done" });
+    } catch (err: any) {
+      updateSlot(id, { error: err.message, status: "error" });
+    }
+  };
+
   // ── Form submit: append a new batch of slots and kick off N pipelines ─────
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    // ── Tweak mode: single slot, single pipeline ─────────────────────────────
+    if (tweakMode) {
+      if (!tweakImage) return alert("Please upload an image to tweak.");
+      if (!tweakInstruction.trim()) return alert("Please describe what you want to change.");
+
+      batchCounter.current += 1;
+      const thisBatchId = batchCounter.current;
+      const thisBatchLabel = `Tweak ${thisBatchId}`;
+      const id = slotCounter.current++;
+      const newSlot: ImageSlot = { id, batchId: thisBatchId, batchLabel: thisBatchLabel, status: "pending", prompt: null, imageUrl: null, error: null };
+      setSlots((prev) => [newSlot, ...prev]);
+      setActiveBatches((n) => n + 1);
+      await generateTweakOne(id, tweakImage, tweakInstruction, client === "yoa");
+      setActiveBatches((n) => n - 1);
+      return;
+    }
 
     // Snapshot the form values at this moment in time
     const snap: FormSnapshot = {
@@ -614,6 +685,7 @@ export default function Home() {
       includeHuman,
       referenceImages: referenceImages.filter((r): r is string => r !== null),
       useExactReference,
+      yoaBgColor: client === "yoa" ? yoaBgColor : null,
     };
 
     // ── Enforce exact reference for array-based layouts if there are reference images ──
@@ -691,7 +763,7 @@ export default function Home() {
         .page-wrap {
           font-family: 'Outfit', -apple-system, sans-serif;
           min-height: 100vh;
-          background: #F4F7F6;
+          background: #0D1117;
           padding: 2rem 1rem 4rem;
         }
 
@@ -699,11 +771,11 @@ export default function Home() {
         .form-card {
           max-width: 580px;
           margin: 0 auto 3rem;
-          background: #FFFFFF;
-          border: 1px solid rgba(0,0,0,0.06);
+          background: #161B22;
+          border: 1px solid rgba(255,255,255,0.07);
           border-radius: 20px;
           padding: 2.5rem;
-          box-shadow: 0 12px 40px rgba(0,0,0,0.04);
+          box-shadow: 0 12px 40px rgba(0,0,0,0.4);
         }
 
         .form-title {
@@ -712,7 +784,7 @@ export default function Home() {
           font-weight: 700;
           letter-spacing: -0.02em;
           margin: 0 0 2rem;
-          background: linear-gradient(90deg, #0f684f, #00A1D7);
+          background: linear-gradient(90deg, #2ecc98, #00A1D7);
           -webkit-background-clip: text;
           -webkit-text-fill-color: transparent;
           background-clip: text;
@@ -721,10 +793,10 @@ export default function Home() {
         .field { display: flex; flex-direction: column; gap: 0.45rem; }
         .field label { font-size: 0.82rem; font-weight: 600; color: #64748b; letter-spacing: 0.05em; text-transform: uppercase; }
         .field textarea, .field input[type=text], .field select, .field input[type=email] {
-          background: #F8FAFC;
-          border: 1.5px solid #E2E8F0;
+          background: #0D1117;
+          border: 1.5px solid #2D3748;
           border-radius: 10px;
-          color: #1e293b;
+          color: #E2E8F0;
           padding: 0.75rem 1rem;
           font-size: 0.95rem;
           font-family: inherit;
@@ -733,10 +805,10 @@ export default function Home() {
           outline: none;
         }
         .field textarea:focus, .field input:focus, .field select:focus {
-          border-color: #0F684F;
-          box-shadow: 0 0 0 4px rgba(15, 104, 79, 0.1);
+          border-color: #2ecc98;
+          box-shadow: 0 0 0 4px rgba(46, 204, 152, 0.12);
         }
-        .field select option { background: #FFFFFF; }
+        .field select option { background: #161B22; color: #E2E8F0; }
 
         .field-row { display: flex; gap: 1.2rem; }
         .field-row .field { flex: 1; }
@@ -746,13 +818,13 @@ export default function Home() {
           align-items: center;
           gap: 0.6rem;
           font-size: 0.9rem;
-          color: #475569;
+          color: #94A3B8;
           cursor: pointer;
           user-select: none;
         }
         .checkbox-row input[type=checkbox] {
           width: 18px; height: 18px;
-          accent-color: #0F684F;
+          accent-color: #2ecc98;
           cursor: pointer;
         }
 
@@ -762,7 +834,7 @@ export default function Home() {
           flex: 1;
           padding: 0.45rem;
           border-radius: 8px;
-          border: 1.5px solid #E2E8F0;
+          border: 1.5px solid #2D3748;
           background: transparent;
           color: #64748b;
           font-size: 0.95rem;
@@ -770,11 +842,11 @@ export default function Home() {
           cursor: pointer;
           transition: all 0.15s;
         }
-        .num-pill:hover { border-color: #0F684F; color: #0F684F; background: rgba(15,104,79,0.05); }
+        .num-pill:hover { border-color: #2ecc98; color: #2ecc98; background: rgba(46,204,152,0.06); }
         .num-pill.active {
-          border-color: #0F684F;
-          background: rgba(15,104,79,0.1);
-          color: #0F684F;
+          border-color: #2ecc98;
+          background: rgba(46,204,152,0.12);
+          color: #2ecc98;
         }
 
         /* file upload */
@@ -782,8 +854,8 @@ export default function Home() {
           display: flex;
           align-items: center;
           gap: 0.6rem;
-          background: #F8FAFC;
-          border: 1.5px dashed #CBD5E1;
+          background: #0D1117;
+          border: 1.5px dashed #2D3748;
           border-radius: 10px;
           padding: 0.7rem 1rem;
           cursor: pointer;
@@ -791,12 +863,12 @@ export default function Home() {
           color: #64748b;
           transition: all 0.2s;
         }
-        .file-label:hover { border-color: #0F684F; color: #0F684F; background: rgba(15,104,79,0.02); }
+        .file-label:hover { border-color: #2ecc98; color: #2ecc98; background: rgba(46,204,152,0.04); }
         .ref-preview {
           width: 48px; height: 48px;
           border-radius: 8px;
           object-fit: cover;
-          border: 1.5px solid rgba(15, 104, 79, 0.2);
+          border: 1.5px solid rgba(46, 204, 152, 0.3);
         }
 
         /* submit button */
@@ -815,15 +887,15 @@ export default function Home() {
           overflow: hidden;
           transition: opacity 0.2s, transform 0.15s, box-shadow 0.2s;
           margin-top: 0.5rem;
-          box-shadow: 0 8px 20px rgba(132, 189, 0, 0.25);
+          box-shadow: 0 8px 20px rgba(132, 189, 0, 0.3);
         }
-        .submit-btn:hover:not(:disabled) { opacity: 0.95; transform: translateY(-2px); box-shadow: 0 12px 25px rgba(132, 189, 0, 0.35); }
-        .submit-btn:disabled { opacity: 0.6; cursor: not-allowed; transform: none; box-shadow: none; }
+        .submit-btn:hover:not(:disabled) { opacity: 0.95; transform: translateY(-2px); box-shadow: 0 12px 25px rgba(132, 189, 0, 0.45); }
+        .submit-btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; box-shadow: none; }
 
         /* progress bar under button */
         .progress-bar-wrap {
           height: 4px;
-          background: #E2E8F0;
+          background: #2D3748;
           border-radius: 2px;
           overflow: hidden;
           margin-top: 0.5rem;
@@ -843,7 +915,7 @@ export default function Home() {
           color: #64748b;
           margin-bottom: 1.5rem;
         }
-        .results-heading strong { color: #1e293b; }
+        .results-heading strong { color: #CBD5E1; }
 
         .image-grid {
           display: grid;
@@ -853,12 +925,12 @@ export default function Home() {
 
         /* ── Image card ── */
         .img-card {
-          background: #FFFFFF;
-          border: 1px solid rgba(0,0,0,0.06);
+          background: #161B22;
+          border: 1px solid rgba(255,255,255,0.07);
           border-radius: 16px;
           overflow: hidden;
           position: relative;
-          box-shadow: 0 8px 30px rgba(0,0,0,0.06);
+          box-shadow: 0 8px 30px rgba(0,0,0,0.4);
           animation: cardAppear 0.4s cubic-bezier(0.16, 1, 0.3, 1);
         }
         @keyframes cardAppear {
@@ -869,23 +941,23 @@ export default function Home() {
         .img-badge {
           position: absolute;
           top: 10px; left: 10px;
-          background: rgba(255,255,255,0.85);
+          background: rgba(13,17,23,0.75);
           backdrop-filter: blur(8px);
           border-radius: 6px;
           font-size: 0.7rem;
           font-weight: 700;
-          color: #1e293b;
+          color: #CBD5E1;
           padding: 3px 8px;
           letter-spacing: 0.05em;
           z-index: 2;
-          box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+          box-shadow: 0 2px 10px rgba(0,0,0,0.3);
         }
 
         /* shimmer skeleton */
         .shimmer {
           width: 100%;
           aspect-ratio: 4/5;
-          background: linear-gradient(90deg, #F1F5F9 25%, #E2E8F0 50%, #F1F5F9 75%);
+          background: linear-gradient(90deg, #1a2130 25%, #212d3d 50%, #1a2130 75%);
           background-size: 200% 100%;
           animation: shimmer 1.4s infinite;
         }
@@ -897,22 +969,22 @@ export default function Home() {
         .img-status {
           position: absolute;
           bottom: 0; left: 0; right: 0;
-          background: rgba(255,255,255,0.85);
+          background: rgba(13,17,23,0.8);
           backdrop-filter: blur(12px);
           padding: 0.65rem 1rem;
           display: flex;
           align-items: center;
           gap: 0.5rem;
           font-size: 0.8rem;
-          color: #475569;
-          border-top: 1px solid rgba(0,0,0,0.05);
+          color: #94A3B8;
+          border-top: 1px solid rgba(255,255,255,0.06);
         }
         .status-dot {
           width: 8px; height: 8px;
           border-radius: 50%;
           flex-shrink: 0;
         }
-        .status-dot.pending   { background: #94A3B8; }
+        .status-dot.pending   { background: #475569; }
         .status-dot.prompting { background: #3B82F6; animation: pulse 1s infinite; }
         .status-dot.generating { background: #F59E0B; animation: pulse 1s infinite; }
         .status-dot.done      { background: #10B981; }
@@ -940,10 +1012,10 @@ export default function Home() {
           display: block;
           margin: 0.75rem auto 0.9rem;
           padding: 0.5rem 1.1rem;
-          background: rgba(15, 104, 79, 0.08);
-          border: 1.5px solid rgba(15, 104, 79, 0.2);
+          background: rgba(46, 204, 152, 0.08);
+          border: 1.5px solid rgba(46, 204, 152, 0.2);
           border-radius: 8px;
-          color: #0F684F;
+          color: #2ecc98;
           font-size: 0.8rem;
           font-weight: 600;
           text-decoration: none;
@@ -953,17 +1025,17 @@ export default function Home() {
           cursor: pointer;
         }
         .dl-btn:hover { 
-          background: rgba(15, 104, 79, 0.15); 
+          background: rgba(46, 204, 152, 0.15); 
           transform: translateY(-1px);
         }
 
         /* error card */
         .error-box {
           padding: 1rem;
-          background: #FEF2F2;
-          border: 1px solid #FCA5A5;
+          background: rgba(239,68,68,0.1);
+          border: 1px solid rgba(239,68,68,0.3);
           border-radius: 8px;
-          color: #B91C1C;
+          color: #FCA5A5;
           font-size: 0.82rem;
           margin: 0.75rem;
         }
@@ -971,15 +1043,129 @@ export default function Home() {
         .global-error {
           max-width: 580px;
           margin: -1.5rem auto 1rem;
-          background: #FEF2F2;
-          border: 1px solid #FCA5A5;
+          background: rgba(239,68,68,0.1);
+          border: 1px solid rgba(239,68,68,0.3);
           border-radius: 10px;
           padding: 0.8rem 1rem;
-          color: #B91C1C;
+          color: #FCA5A5;
           font-size: 0.88rem;
         }
 
+        /* ── Tweak section ── */
+        .tweak-toggle {
+          display: flex;
+          align-items: flex-start;
+          gap: 0.6rem;
+          padding: 0.75rem 1rem;
+          background: #0D1117;
+          border: 1.5px solid #2D3748;
+          border-radius: 12px;
+          cursor: pointer;
+          transition: all 0.2s;
+          user-select: none;
+        }
+        .tweak-toggle:hover { border-color: #2ecc98; }
+        .tweak-toggle.active {
+          border-color: rgba(46,204,152,0.4);
+          background: rgba(46,204,152,0.05);
+        }
+        .tweak-toggle input[type=checkbox] {
+          width: 18px; height: 18px;
+          accent-color: #2ecc98;
+          cursor: pointer;
+          margin-top: 1px;
+          flex-shrink: 0;
+        }
+        .tweak-body {
+          display: flex;
+          flex-direction: column;
+          gap: 1rem;
+          padding: 1rem;
+          background: rgba(46,204,152,0.03);
+          border: 1.5px solid rgba(46,204,152,0.15);
+          border-top: none;
+          border-radius: 0 0 12px 12px;
+          margin-top: -4px;
+        }
+        .tweak-upload {
+          display: flex;
+          align-items: center;
+          gap: 0.75rem;
+          background: #0D1117;
+          border: 1.5px dashed #2D3748;
+          border-radius: 10px;
+          padding: 0.75rem 1rem;
+          cursor: pointer;
+          font-size: 0.9rem;
+          color: #64748b;
+          transition: all 0.2s;
+        }
+        .tweak-upload:hover { border-color: #2ecc98; color: #2ecc98; }
+        .tweak-preview {
+          width: 56px; height: 56px;
+          border-radius: 8px;
+          object-fit: cover;
+          border: 2px solid rgba(46,204,152,0.3);
+          flex-shrink: 0;
+        }
+
         .form-stack { display: flex; flex-direction: column; gap: 1.25rem; }
+
+        /* ── YOA Background Palette ── */
+        .palette-grid {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 0.55rem;
+          margin-top: 0.35rem;
+        }
+        .swatch-btn {
+          width: 36px;
+          height: 36px;
+          border-radius: 8px;
+          border: 2px solid transparent;
+          cursor: pointer;
+          transition: transform 0.15s, border-color 0.15s, box-shadow 0.15s;
+          position: relative;
+          flex-shrink: 0;
+        }
+        .swatch-btn:hover { transform: scale(1.15); }
+        .swatch-btn.selected {
+          border-color: #2ecc98;
+          box-shadow: 0 0 0 3px rgba(46,204,152,0.3);
+          transform: scale(1.12);
+        }
+        .swatch-none {
+          width: 36px;
+          height: 36px;
+          border-radius: 8px;
+          border: 2px dashed #2D3748;
+          cursor: pointer;
+          background: transparent;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 0.75rem;
+          color: #64748b;
+          transition: all 0.15s;
+          flex-shrink: 0;
+        }
+        .swatch-none:hover { border-color: #2ecc98; color: #2ecc98; }
+        .swatch-none.selected {
+          border-color: #2ecc98;
+          color: #2ecc98;
+          box-shadow: 0 0 0 3px rgba(46,204,152,0.3);
+        }
+        .palette-label-row {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          margin-bottom: 0.1rem;
+        }
+        .palette-color-name {
+          font-size: 0.72rem;
+          color: #64748b;
+          margin-top: 0.2rem;
+        }
       `}</style>
 
       <div className="page-wrap">
@@ -996,6 +1182,61 @@ export default function Home() {
                 <option value="yoa">YOA</option>
               </select>
             </div>
+
+            {/* YOA — Background Colour Palette */}
+            {client === "yoa" && (() => {
+              const palette = [
+                // ── Brand core ─────────────────────────────────────
+                { hex: "#0F684F", name: "YOA Dark Green" },
+                { hex: "#84BD00", name: "YOA Bright Green" },
+                { hex: "#D4EB8E", name: "YOA Light Green" },
+                // ── Complementary brand neutrals ───────────────────
+                { hex: "#1A2E25", name: "Deep Forest" },
+                { hex: "#2D4A38", name: "Rainforest" },
+                { hex: "#F5F0E8", name: "Warm Ivory" },
+                { hex: "#EAF4E2", name: "Fresh Mint" },
+                // ── Environmental / lifestyle tones ─────────────────
+                { hex: "#1C3557", name: "Ocean Blue" },
+                { hex: "#B5813B", name: "Warm Gold" },
+                { hex: "#3B2A1A", name: "Deep Earth" },
+                { hex: "#7A9E87", name: "Sage" },
+                { hex: "#C8D8E4", name: "Sky Mist" },
+              ];
+              const selected = palette.find(p => p.hex === yoaBgColor);
+              return (
+                <div className="field">
+                  <div className="palette-label-row">
+                    <label style={{ margin: 0 }}>Background Colour Hint</label>
+                    {selected && (
+                      <span className="palette-color-name">
+                        {selected.hex} · {selected.name}
+                      </span>
+                    )}
+                  </div>
+                  <div className="palette-grid">
+                    <button
+                      type="button"
+                      title="No preference — AI chooses"
+                      className={`swatch-none${yoaBgColor === null ? " selected" : ""}`}
+                      onClick={() => setYoaBgColor(null)}
+                    >✕</button>
+                    {palette.map(({ hex, name }) => (
+                      <button
+                        key={hex}
+                        type="button"
+                        title={`${name} ${hex}`}
+                        className={`swatch-btn${yoaBgColor === hex ? " selected" : ""}`}
+                        style={{ background: hex }}
+                        onClick={() => setYoaBgColor(hex)}
+                      />
+                    ))}
+                  </div>
+                  <p style={{ margin: "0.35rem 0 0", fontSize: "0.75rem", color: "#475569" }}>
+                    Nudges the AI to use this colour as the dominant background / environment tone.
+                  </p>
+                </div>
+              );
+            })()}
 
             {/* Concept */}
             <div className="field">
@@ -1139,8 +1380,8 @@ export default function Home() {
                   style={{
                     marginTop: "0.6rem",
                     padding: "0.6rem 0.85rem",
-                    background: useExactReference ? "rgba(15, 104, 79, 0.06)" : "#F8FAFC",
-                    border: `1.5px solid ${useExactReference ? "rgba(15, 104, 79, 0.3)" : "#E2E8F0"}`,
+                    background: useExactReference ? "rgba(46, 204, 152, 0.08)" : "#0D1117",
+                    border: `1.5px solid ${useExactReference ? "rgba(46, 204, 152, 0.3)" : "#2D3748"}`,
                     borderRadius: "10px",
                     transition: "all 0.2s",
                   }}
@@ -1151,7 +1392,7 @@ export default function Home() {
                     onChange={(e) => setUseExactReference(e.target.checked)}
                   />
                   <span>
-                    <strong style={{ color: useExactReference ? "#0F684F" : "#475569" }}>Use exact reference image(s)</strong>
+                    <strong style={{ color: useExactReference ? "#2ecc98" : "#94A3B8" }}>Use exact reference image(s)</strong>
                     <span style={{ display: "block", fontSize: "0.75rem", color: "#64748b", marginTop: "2px" }}>
                       Skip AI generation — output the uploaded image(s) directly
                     </span>
@@ -1160,11 +1401,83 @@ export default function Home() {
               )}
             </div>
 
+            {/* ── Tweak Mode Section ─────────────────────────────────────────── */}
+            <label className={`tweak-toggle${tweakMode ? " active" : ""}`}>
+              <input
+                type="checkbox"
+                checked={tweakMode}
+                onChange={(e) => setTweakMode(e.target.checked)}
+              />
+              <span>
+                <strong style={{ color: tweakMode ? "#2ecc98" : "#94A3B8", fontSize: "0.92rem" }}>
+                  ✏️ Tweak a reference image
+                </strong>
+                <span style={{ display: "block", fontSize: "0.75rem", color: "#64748b", marginTop: "2px" }}>
+                  Edit an existing photo with a plain-English instruction — change background, expression, lighting, or clothing
+                </span>
+              </span>
+            </label>
+
+            {tweakMode && (
+              <div className="tweak-body">
+                {/* Image upload */}
+                <div className="field">
+                  <label>Image to Tweak</label>
+                  <label className="tweak-upload" htmlFor="tweak-img-input">
+                    {tweakImage ? (
+                      <>
+                        <img src={tweakImage} className="tweak-preview" alt="tweak source" />
+                        <span style={{ fontSize: "0.85rem", color: "#94A3B8" }}>Image loaded — click to change</span>
+                      </>
+                    ) : (
+                      <>
+                        <span style={{ fontSize: "1.3rem" }}>🖼️</span>
+                        <span>Upload the image you want to edit</span>
+                      </>
+                    )}
+                  </label>
+                  <input
+                    id="tweak-img-input"
+                    ref={tweakFileInputRef}
+                    type="file"
+                    accept="image/*"
+                    style={{ display: "none" }}
+                    onChange={async (e) => {
+                      const file = e.target.files?.[0];
+                      if (!file) return;
+                      try { setTweakImage(await compressImage(file)); }
+                      catch { alert("Could not process the image. Try another file."); }
+                    }}
+                  />
+                </div>
+
+                {/* Instruction */}
+                <div className="field">
+                  <label>Edit Instruction</label>
+                  <textarea
+                    value={tweakInstruction}
+                    onChange={(e) => setTweakInstruction(e.target.value)}
+                    rows={3}
+                    placeholder={
+                      ["Make the person smile warmly",
+                       "Change the background to a modern office",
+                       "Replace the garden with a busy city street",
+                       "Add warm golden hour lighting",
+                       "Change the shirt to white professional attire"
+                      ][Math.floor(Date.now() / 4000) % 5]
+                    }
+                  />
+                </div>
+              </div>
+            )}
+
             {/* Submit — always enabled so you can queue more batches */}
             <button type="submit" className="submit-btn">
-              {activeBatches > 0
-                ? `✨ Queue ${numImages} More Image${numImages > 1 ? "s" : ""}`
-                : `✨ Generate ${numImages} Image${numImages > 1 ? "s" : ""}`}
+              {tweakMode
+                ? (activeBatches > 0 ? "✏️ Queue Tweak" : "✏️ Apply Tweak")
+                : (activeBatches > 0
+                    ? `✨ Queue ${numImages} More Image${numImages > 1 ? "s" : ""}`
+                    : `✨ Generate ${numImages} Image${numImages > 1 ? "s" : ""}`)}
             </button>
 
             {/* Progress bar — shows overall active-slot progress */}
@@ -1220,11 +1533,11 @@ function ImageCard({ slot, index }: { slot: ImageSlot; index: number }) {
       {slot.batchId > 1 && (
         <span style={{
           position: 'absolute', top: 10, right: 10,
-          background: 'rgba(0,161,215,0.25)',
-          border: '1px solid rgba(0,161,215,0.4)',
+          background: 'rgba(0,161,215,0.2)',
+          border: '1px solid rgba(0,161,215,0.35)',
           backdropFilter: 'blur(8px)',
           borderRadius: '6px', fontSize: '0.65rem',
-          fontWeight: 700, color: '#00A1D7',
+          fontWeight: 700, color: '#38bdf8',
           padding: '3px 8px', zIndex: 2,
           letterSpacing: '0.04em',
         }}>{slot.batchLabel}</span>
@@ -1234,7 +1547,7 @@ function ImageCard({ slot, index }: { slot: ImageSlot; index: number }) {
       {slot.status === "done" && slot.imageUrl ? (
         <img src={slot.imageUrl} className="img-reveal" alt={`Generated image ${index}`} />
       ) : slot.status === "error" ? (
-        <div style={{ aspectRatio: "4/5", background: "rgba(233,83,69,0.05)" }} />
+        <div style={{ aspectRatio: "4/5", background: "rgba(239,68,68,0.07)" }} />
       ) : (
         <div className="shimmer" />
       )}
@@ -1266,8 +1579,8 @@ function ImageCard({ slot, index }: { slot: ImageSlot; index: number }) {
       {/* Prompt preview on hover (collapsed by default) */}
       {slot.prompt && slot.status === "done" && (
         <details style={{ margin: "0 0.75rem 0.75rem", fontSize: "0.75rem", color: "#64748b" }}>
-          <summary style={{ cursor: "pointer", color: "#475569" }}>View prompt</summary>
-          <p style={{ marginTop: "0.5rem", lineHeight: 1.5 }}>{slot.prompt}</p>
+          <summary style={{ cursor: "pointer", color: "#94A3B8" }}>View prompt</summary>
+          <p style={{ marginTop: "0.5rem", lineHeight: 1.5, color: "#64748b" }}>{slot.prompt}</p>
         </details>
       )}
     </div>
