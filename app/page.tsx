@@ -12,6 +12,7 @@ type ImageSlot = {
   prompt: string | null;
   imageUrl: string | null;
   error: string | null;
+  aspectRatio: string;
 };
 
 type FormSnapshot = {
@@ -24,6 +25,8 @@ type FormSnapshot = {
   referenceImages: string[];
   useExactReference: boolean;
   yoaBgColor: string | null;
+  isnBgColor: string | null;
+  aspectRatio: string;
 };
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -39,6 +42,9 @@ export default function Home() {
   const [useExactReference, setUseExactReference] = useState(false);
   const [numImages, setNumImages] = useState(1);
   const [yoaBgColor, setYoaBgColor] = useState<string | null>(null);
+  const [isnBgColor, setIsnBgColor] = useState<string | null>(null);
+  const [aspectRatio, setAspectRatio] = useState("4:5");
+  const [tweakAspectRatio, setTweakAspectRatio] = useState("4:5");
 
   // ── Tweak mode state ──────────────────────────────────────────────────────
   const [tweakMode, setTweakMode] = useState(false);
@@ -547,6 +553,7 @@ export default function Home() {
           includeHuman: snap.includeHuman,
           hasReferenceImages: snap.referenceImages.length > 0,
           yoaBgColor: snap.yoaBgColor,
+          isnBgColor: snap.isnBgColor,
         }),
       });
       const data1 = await res1.json();
@@ -561,6 +568,7 @@ export default function Home() {
         body: JSON.stringify({
           imagePrompt: data1.prompt,
           referenceImages: snap.referenceImages,
+          aspectRatio: snap.aspectRatio,
         }),
       });
       const data2 = await res2.json();
@@ -609,16 +617,16 @@ export default function Home() {
     }
   };
 
-  // ── Tweak pipeline: send image + instruction to FLUX Kontext, then poll ───
-  const generateTweakOne = async (id: number, imageDataUri: string, instruction: string, applyYoa: boolean) => {
+  // ── Tweak pipeline: send image + instruction to Nano Banana Pro, then poll ───
+  const generateTweakOne = async (id: number, imageDataUri: string, instruction: string, applyYoa: boolean, aspectRatio: string) => {
     try {
       updateSlot(id, { status: "generating", prompt: instruction });
 
-      // Step 1 — Start the Kontext edit
+      // Step 1 — Start the edit
       const res = await fetch("/api/tweak-image", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ imageDataUri, instruction }),
+        body: JSON.stringify({ imageDataUri, instruction, aspectRatio }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to start tweak");
@@ -667,10 +675,10 @@ export default function Home() {
       const thisBatchId = batchCounter.current;
       const thisBatchLabel = `Tweak ${thisBatchId}`;
       const id = slotCounter.current++;
-      const newSlot: ImageSlot = { id, batchId: thisBatchId, batchLabel: thisBatchLabel, status: "pending", prompt: null, imageUrl: null, error: null };
+      const newSlot: ImageSlot = { id, batchId: thisBatchId, batchLabel: thisBatchLabel, status: "pending", prompt: null, imageUrl: null, error: null, aspectRatio: tweakAspectRatio };
       setSlots((prev) => [newSlot, ...prev]);
       setActiveBatches((n) => n + 1);
-      await generateTweakOne(id, tweakImage, tweakInstruction, client === "yoa");
+      await generateTweakOne(id, tweakImage, tweakInstruction, client === "yoa", tweakAspectRatio);
       setActiveBatches((n) => n - 1);
       return;
     }
@@ -686,6 +694,8 @@ export default function Home() {
       referenceImages: referenceImages.filter((r): r is string => r !== null),
       useExactReference,
       yoaBgColor: client === "yoa" ? yoaBgColor : null,
+      isnBgColor: client === "isn" ? isnBgColor : null,
+      aspectRatio,
     };
 
     // ── Enforce exact reference for array-based layouts if there are reference images ──
@@ -701,7 +711,7 @@ export default function Home() {
 
       if (snap.placement === "collage" || snap.placement === "list") {
         const id = slotCounter.current++;
-        const newSlot: ImageSlot = { id, batchId: thisBatchId, batchLabel: thisBatchLabel, status: "pending", prompt: null, imageUrl: null, error: null };
+        const newSlot: ImageSlot = { id, batchId: thisBatchId, batchLabel: thisBatchLabel, status: "pending", prompt: null, imageUrl: null, error: null, aspectRatio: snap.aspectRatio };
         setSlots((prev) => [newSlot, ...prev]);
         setActiveBatches((n) => n + 1);
         await Promise.allSettled([generateOne(newSlot.id, snap, snap.referenceImages)]);
@@ -709,7 +719,7 @@ export default function Home() {
       } else {
         const newSlots: ImageSlot[] = snap.referenceImages.map(() => {
           const id = slotCounter.current++;
-          return { id, batchId: thisBatchId, batchLabel: thisBatchLabel, status: "pending", prompt: null, imageUrl: null, error: null };
+          return { id, batchId: thisBatchId, batchLabel: thisBatchLabel, status: "pending", prompt: null, imageUrl: null, error: null, aspectRatio: snap.aspectRatio };
         });
 
         setSlots((prev) => [...newSlots, ...prev]);
@@ -736,6 +746,7 @@ export default function Home() {
         prompt: null,
         imageUrl: null,
         error: null,
+        aspectRatio: snap.aspectRatio,
       };
     });
 
@@ -956,7 +967,6 @@ export default function Home() {
         /* shimmer skeleton */
         .shimmer {
           width: 100%;
-          aspect-ratio: 4/5;
           background: linear-gradient(90deg, #1a2130 25%, #212d3d 50%, #1a2130 75%);
           background-size: 200% 100%;
           animation: shimmer 1.4s infinite;
@@ -997,7 +1007,6 @@ export default function Home() {
         /* done image reveal */
         .img-reveal {
           width: 100%;
-          aspect-ratio: 4/5;
           object-fit: cover;
           display: block;
           animation: fadeIn 0.6s ease;
@@ -1183,6 +1192,49 @@ export default function Home() {
               </select>
             </div>
 
+            {/* ISN — Background Colour Palette */}
+            {client === "isn" && (() => {
+              const palette = [
+                { hex: "#152852", name: "Deep Blue" },
+                { hex: "#007bd6", name: "Brand Blue" },
+                { hex: "#66c7e7", name: "Light Blue" },
+              ];
+              const selected = palette.find(p => p.hex === isnBgColor);
+              return (
+                <div className="field">
+                  <div className="palette-label-row">
+                    <label style={{ margin: 0 }}>Background Colour Hint</label>
+                    {selected && (
+                      <span className="palette-color-name">
+                        {selected.hex} · {selected.name}
+                      </span>
+                    )}
+                  </div>
+                  <div className="palette-grid">
+                    <button
+                      type="button"
+                      title="No preference — AI chooses"
+                      className={`swatch-none${isnBgColor === null ? " selected" : ""}`}
+                      onClick={() => setIsnBgColor(null)}
+                    >✕</button>
+                    {palette.map(({ hex, name }) => (
+                      <button
+                        key={hex}
+                        type="button"
+                        title={`${name} ${hex}`}
+                        className={`swatch-btn${isnBgColor === hex ? " selected" : ""}`}
+                        style={{ background: hex }}
+                        onClick={() => setIsnBgColor(hex)}
+                      />
+                    ))}
+                  </div>
+                  <p style={{ margin: "0.35rem 0 0", fontSize: "0.75rem", color: "#475569" }}>
+                    Nudges the AI to use this colour as a solid gradient studio background.
+                  </p>
+                </div>
+              );
+            })()}
+
             {/* YOA — Background Colour Palette */}
             {client === "yoa" && (() => {
               const palette = [
@@ -1288,14 +1340,25 @@ export default function Home() {
 
             {/* Options row */}
             <div className="field-row" style={{ alignItems: "center" }}>
-              <label className="checkbox-row">
-                <input
-                  type="checkbox"
-                  checked={includeHuman}
-                  onChange={(e) => setIncludeHuman(e.target.checked)}
-                />
-                Include humans in scene
-              </label>
+              <div className="field" style={{ flex: 1, marginTop: '20px' }}>
+                <label className="checkbox-row">
+                  <input
+                    type="checkbox"
+                    checked={includeHuman}
+                    onChange={(e) => setIncludeHuman(e.target.checked)}
+                  />
+                  Include humans in scene
+                </label>
+              </div>
+
+              <div className="field" style={{ flex: 1 }}>
+                <label>Aspect Ratio</label>
+                <select value={aspectRatio} onChange={(e) => setAspectRatio(e.target.value)}>
+                  <option value="4:5">Portrait (4:5) - Default</option>
+                  <option value="9:16">Story / Reel (9:16)</option>
+                  <option value="16:9">Landscape (16:9)</option>
+                </select>
+              </div>
             </div>
 
             {/* Number of images */}
@@ -1527,6 +1590,9 @@ function ImageCard({ slot, index }: { slot: ImageSlot; index: number }) {
     error: "Failed",
   };
 
+  // convert string like "16:9" to the CSS value
+  const ar = slot.aspectRatio.replace(':', '/');
+
   return (
     <div className="img-card">
       <span className="img-badge">#{index}</span>
@@ -1545,11 +1611,11 @@ function ImageCard({ slot, index }: { slot: ImageSlot; index: number }) {
 
       {/* Image area */}
       {slot.status === "done" && slot.imageUrl ? (
-        <img src={slot.imageUrl} className="img-reveal" alt={`Generated image ${index}`} />
+        <img src={slot.imageUrl} className="img-reveal" alt={`Generated image ${index}`} style={{ aspectRatio: ar }} />
       ) : slot.status === "error" ? (
-        <div style={{ aspectRatio: "4/5", background: "rgba(239,68,68,0.07)" }} />
+        <div style={{ aspectRatio: ar, background: "rgba(239,68,68,0.07)" }} />
       ) : (
-        <div className="shimmer" />
+        <div className="shimmer" style={{ aspectRatio: ar }} />
       )}
 
       {/* Status bar */}

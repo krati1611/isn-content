@@ -35,7 +35,7 @@ async function uploadBase64ToReplicate(dataUri: string, token: string): Promise<
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    const { imageDataUri, instruction } = body as { imageDataUri: string; instruction: string };
+    const { imageDataUri, instruction, aspectRatio } = body as { imageDataUri: string; instruction: string, aspectRatio?: string };
 
     if (!imageDataUri) throw new Error('No image provided for tweaking.');
     if (!instruction?.trim()) throw new Error('No edit instruction provided.');
@@ -45,9 +45,9 @@ export async function POST(req: Request) {
     // 1 — Upload source image to Replicate so we have a public URL
     const inputImageUrl = await uploadBase64ToReplicate(imageDataUri, REPLICATE_API_TOKEN);
 
-    // 2 — Call FLUX.1 Kontext [pro] — instruction-based image editor
+    // 2 — Call Google Nano Banana Pro
     const repRes = await fetch(
-      'https://api.replicate.com/v1/models/black-forest-labs/flux-kontext-pro/predictions',
+      'https://api.replicate.com/v1/models/google/nano-banana-pro/predictions',
       {
         method: 'POST',
         headers: {
@@ -57,7 +57,9 @@ export async function POST(req: Request) {
         body: JSON.stringify({
           input: {
             prompt: instruction.trim(),
-            input_image: inputImageUrl,
+            image_input: [inputImageUrl],
+            resolution: "2K",
+            aspect_ratio: aspectRatio || "4:5",
             output_format: 'png',
           },
         }),

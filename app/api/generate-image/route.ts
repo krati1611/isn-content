@@ -39,14 +39,14 @@ async function uploadBase64ToReplicate(dataUri: string, token: string): Promise<
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    const { imagePrompt, referenceImages } = body as { imagePrompt: string; referenceImages?: string[] };
+    const { imagePrompt, referenceImages, aspectRatio } = body as { imagePrompt: string; referenceImages?: string[], aspectRatio?: string };
 
     const REPLICATE_API_TOKEN = process.env.REPLICATE_API_TOKEN!;
 
     const replicateInputs: any = {
       prompt: imagePrompt.replace(/\\n/g, ' ').replace(/\\"/g, ''),
       resolution: "2K",
-      aspect_ratio: "4:5",
+      aspect_ratio: aspectRatio || "4:5",
       output_format: "png"
     };
 

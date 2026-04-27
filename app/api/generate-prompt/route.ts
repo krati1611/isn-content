@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server';
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    const { client, idea, hook, goal, placement, includeHuman, hasReferenceImages, yoaBgColor } = body;
+    const { client, idea, hook, goal, placement, includeHuman, hasReferenceImages, yoaBgColor, isnBgColor } = body;
 
     // When reference images contain people, override generic person rule with fidelity instruction
     const personRule = hasReferenceImages && includeHuman
@@ -12,22 +12,29 @@ export async function POST(req: Request) {
         ? "All people must be Nigerian West African, dark skin, natural features, warm and relatable expressions."
         : "DO NOT include any people, focus entirely on the products and environment.";
 
-    // Build an optional colour-tone hint for YOA backgrounds
-    const bgColorHint = (client === "yoa" && yoaBgColor)
-      ? ` The dominant colour tone of the background/environment should be ${yoaBgColor} — use this as the key environmental colour, keeping it realistic and not artificially saturated.`
-      : "";
-
     const bgSystem = client === "yoa"
-      ? `a realistic, natural environment suited to the idea (e.g. out-of-focus office space, sky, or outdoor setting)${bgColorHint}`
-      : "a seamless, pure white or off-white photography studio backdrop";
+      ? yoaBgColor
+        ? `a seamless photography studio backdrop entirely in the exact color ${yoaBgColor} with a subtle gradient effect`
+        : "a realistic, natural environment suited to the idea (e.g. out-of-focus office space, sky, or outdoor setting)"
+      : client === "isn" && isnBgColor
+        ? `a seamless photography studio backdrop entirely in the exact color ${isnBgColor} with a subtle gradient effect`
+        : "a seamless, pure white or off-white photography studio backdrop";
 
     const bgUser = client === "yoa"
-      ? `a realistic and natural environment based on the prompt idea${bgColorHint}`
-      : "a seamless pure white or soft off-white photography studio backdrop";
+      ? yoaBgColor
+        ? `a clean, pristine photography studio backdrop filled entirely with the precise color ${yoaBgColor}, featuring a soft, subtle, professional lighting gradient`
+        : "a realistic and natural environment based on the prompt idea"
+      : client === "isn" && isnBgColor
+        ? `a clean, pristine photography studio backdrop filled entirely with the precise color ${isnBgColor}, featuring a soft, subtle, professional lighting gradient`
+        : "a seamless pure white or soft off-white photography studio backdrop";
 
     const emptyUser = client === "yoa"
-      ? "clean, uncluttered negative space within the scene's environment (e.g., clear sky or smoothed blurred wall). NO busy patterns or distracting visual clutter in the empty area."
-      : "pure empty space. NO busy backgrounds or hard split lines.";
+      ? yoaBgColor
+        ? `clean, uncluttered solid colour space matching the backdrop gradient. NO busy patterns.`
+        : "clean, uncluttered negative space within the scene's environment (e.g., clear sky or smoothed blurred wall). NO busy patterns or distracting visual clutter in the empty area."
+      : client === "isn" && isnBgColor
+        ? `clean, uncluttered solid colour space matching the backdrop gradient. NO busy patterns.`
+        : "pure empty space. NO busy backgrounds or hard split lines.";
 
     let layoutSystem = "";
     let layoutUser = "";
@@ -73,12 +80,12 @@ Brand Identity: Clear, supportive, informative, and human-centered. Balances pro
 Post Idea: ${idea}
 Hook: ${hook}
 Goal: ${goal}${yoaBgColor ? `
-Background Colour: ${yoaBgColor} — build the scene's environment and lighting palette primarily around this colour tone.` : ""}
+Background Colour: ${yoaBgColor} — the entire background MUST be a solid studio backdrop of this specific colour with a slight lighting gradient glow. Do not build a natural environment.` : ""}
 
 Create a portrait format base image with these exact rules:
 1. ${layoutUser}
-2. The scene should utilize a fully realistic environment based on the prompt idea (e.g., an office, an outdoor site, a home). Do not use a stark white studio backdrop.
-3. Scene: Subjects immersed naturally into the real-world environment — warm natural light, cinematic depth of field, candid and emotionally authentic feel
+2. ${yoaBgColor ? "The scene MUST utilize a seamless, solid-colour studio backdrop matching the Background Colour with a subtle lighting gradient." : "The scene should utilize a fully realistic environment based on the prompt idea (e.g., an office, an outdoor site, a home). Do not use a stark white studio backdrop."}
+3. ${yoaBgColor ? "Scene: Subjects isolated cleanly against the coloured studio background — professional, cinematic lighting, crisp subject separation." : "Scene: Subjects immersed naturally into the real-world environment — warm natural light, cinematic depth of field, candid and emotionally authentic feel"}
 4. ${personRule}
 5. Scene should feel real and human — not clinical, not staged, not stock photo. Represent professional excellence, security, and Nigerian lifestyle.
 6. Lighting: warm natural daylight or soft studio box light, bright and airy
@@ -96,12 +103,13 @@ Create a portrait format base image with these exact rules:
 Primary Colours: ISN Red #E95345, ISN Blue #00A1D7
 Post Idea: ${idea}
 Hook: ${hook}
-Goal: ${goal}
+Goal: ${goal}${isnBgColor ? `
+Background Colour: ${isnBgColor} — the entire background MUST be a solid studio backdrop of this specific colour with a slight lighting gradient glow.` : ""}
 
 Create a portrait format base image with these exact rules:
 1. ${layoutUser}
-2. The scene should utilize a seamless studio backdrop (pure white or very soft textured off-white) with soft, realistic contact shadows.
-3. Scene: Subjects isolated cleanly against the studio background — warm natural light, candid and emotionally authentic feel
+2. ${isnBgColor ? "The scene MUST utilize a seamless, solid-colour studio backdrop matching the Background Colour with a subtle lighting gradient." : "The scene should utilize a seamless studio backdrop (pure white or very soft textured off-white) with soft, realistic contact shadows."}
+3. ${isnBgColor ? "Scene: Subjects isolated cleanly against the coloured studio background — professional, cinematic lighting, crisp subject separation." : "Scene: Subjects isolated cleanly against the studio background — warm natural light, candid and emotionally authentic feel"}
 4. ${personRule}
 5. Scene should feel real and human — not clinical, not staged, not stock photo
 6. Lighting: warm natural daylight or soft studio box light, bright and airy
